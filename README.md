@@ -1,8 +1,8 @@
 # Antichamber VR
 
 An unofficial VR mod for [Antichamber](https://store.steampowered.com/app/219890/Antichamber/) (Steam version) with
-6DoF head tracking, roomscale, motion controls and a settings launcher. It works through SteamVR (OpenVR) and has been
-played with a Quest 2 and Steam Frame / Quest Touch controllers.
+6DoF head tracking, roomscale, motion controls and a settings launcher. It works through SteamVR (OpenVR), has been
+played with the Steam Frame, and also supports Quest Touch controllers.
 
 > Not affiliated with Alexander Bruce or Demruth. You need your own copy of Antichamber on Steam.
 > The mod does not modify any game file: it is a `d3d9.dll` loaded next to the game executable.
@@ -28,7 +28,7 @@ played with a Quest 2 and Steam Frame / Quest Touch controllers.
 ## Requirements
 
 - Antichamber on Steam (Windows, the current Steam build: UDK 7977, 32-bit DX9).
-- SteamVR and a headset. Tested with a Quest 2.
+- SteamVR and a headset. Tested with the Steam Frame.
 - For the launcher: the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (x64).
 
 ## Install
@@ -120,8 +120,8 @@ MIT, see [LICENSE](LICENSE). Third-party components: [THIRD_PARTY_NOTICES.md](TH
 ## Español
 
 Mod de realidad virtual no oficial para Antichamber (versión de Steam): seguimiento 6DoF, roomscale, mandos de
-movimiento y un launcher con todas las opciones. Funciona con SteamVR y se ha jugado con Quest 2 y mandos
-Steam Frame / Quest Touch. No tiene relación con los autores del juego; necesitas tu propia copia en Steam.
+movimiento y un launcher con todas las opciones. Funciona con SteamVR, se ha jugado con las Steam Frame
+y también admite los mandos Quest Touch. No tiene relación con los autores del juego; necesitas tu propia copia en Steam.
 
 **Instalación:** descarga el zip de [Releases](../../releases), extráelo en la carpeta de Antichamber
 (`AntichamberVR.exe` junto a `Binaries`), abre SteamVR con el visor conectado, ejecuta `AntichamberVR.exe` y pulsa
