@@ -1,0 +1,12 @@
+# Toolchain downloaded by scripts/setup_toolchain.sh
+tools/
+
+# Build output
+build/
+launcher/bin/
+launcher/obj/
+
+# Game-side runtime files that may end up here
+*.log
+vr_eye*.jpg
+vr_shot*.jpg
