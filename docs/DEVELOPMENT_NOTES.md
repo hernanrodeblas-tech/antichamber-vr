@@ -182,3 +182,18 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
   - Sin efecto medible: `StereoCaptures=0`, profundidad de campo, oclusión ambiental, rayos de luz y destellos.
     Los scripts del juego suman 2–4 ms por fotograma (`DebugProfile=1`).
 - Configuración para las Frame: `config/antichamber_vr_steamframe.ini`.
+
+## Versión 1.2: campo de visión por ojo (`AsymmetricFrustum`)
+
+- Medido con `perf cpu busy`: en las Frame limita el **hilo de render** (14–18 ms por fotograma), no el del juego
+  (8–9 ms) ni los scripts (2–4 ms). Desactivar las consultas de oclusión no ayuda: se dibujan más objetos.
+- Antes cada ojo dibujaba un cuadro simétrico que cubría su campo asimétrico y SteamVR recortaba ~28 %. Ahora cada ojo
+  dibuja exactamente su propio campo (1728×1728 en las Frame en vez de 2004×2076) y el motor descarta lo que queda fuera.
+- Proyecciones encontradas por desensamblado y diagnóstico (`DebugProjection=1`):
+  - Vista principal: `FPerspectiveMatrix` de 6 parámetros (0x00A43F10), llamada desde `CalcSceneView` (vuelve a
+    0x00A5DB48) una vez por ojo. Se sustituyen M[0][0], M[1][1], M[2][0] y M[2][1] por los del ojo.
+  - Capturas de escena: calculan su proyección en línea (0x00A682A0, matriz en +0xF0). Se sustituye igual, solo en la
+    actualización por ojo que hace el mod (`StereoCaptures`), para que lo compuesto en pantalla siga encajando.
+  - La pistola usa la proyección del mundo; el punto de mira, el recuadro del bloque y el grosor de las líneas usan la
+    proyección de cada ojo.
+- Resultado en las Frame a 90 Hz: hilo de render 9–16 ms (casi siempre 12–14) y 45 fps estables casi todo el tiempo.

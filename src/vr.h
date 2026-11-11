@@ -9,7 +9,10 @@ namespace vr {
 struct EyeInfo {
     float tanLeft, tanRight, tanUp, tanDown; // positive magnitudes
     Mat34 eyeToHead;
-    float uMin, vMin, uMax, vMax;            // crop inside the symmetric render
+    float uMin, vMin, uMax, vMax;            // crop inside the render (the whole image when asymmetric)
+    // Projection of this eye on the rendered image: ndcX = projX * x/z + offX, ndcY = projY * y/z + offY
+    // (view space x right, y up, z forward; ndc -1..1, y up). Symmetric: offsets are 0.
+    float projX, projY, offX, offY;
 };
 
 struct Setup {
@@ -18,6 +21,8 @@ struct Setup {
     uint32_t renderW = 0, renderH = 0; // size the game must render at (symmetric frustum)
     float tanH = 1, tanV = 1;          // symmetric half-FOV tangents
     float fovDeg = 90;                 // horizontal FOV to give Unreal
+    bool asymmetric = false;           // each eye renders its own off-centre frustum (AsymmetricFrustum=1)
+    float lineTanH = 1, lineTanV = 1;  // half-tangent spanned by the render (for the linework fix)
     float displayHz = 90;
     float vsyncToPhotons = 0.011f;
     int adapterIndex = 0;
@@ -43,6 +48,7 @@ struct Frame {
 bool HmdPresent();          // cheap check, before Init
 bool Init();                // game thread or render thread, once
 bool Active();
+void ComputeFrustum();      // (re)computes the render size and per-eye projections from the config
 void Shutdown();
 
 void GetFrame(Frame& out);  // predicted poses + controller state (game thread)

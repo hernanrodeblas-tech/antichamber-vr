@@ -727,7 +727,7 @@ static void PreTick(Obj pc, float dt) {
             lastMic = mic;
             countdown = 300;
             const float flatTanH = 1.0f, flatTanV = 0.5625f;
-            shading::ApplyLineSampling(mic, flatTanH / vr::S.tanH * g_cfg.lineworkScale, flatTanV / vr::S.tanV * g_cfg.lineworkScale);
+            shading::ApplyLineSampling(mic, flatTanH / vr::S.lineTanH * g_cfg.lineworkScale, flatTanV / vr::S.lineTanV * g_cfg.lineworkScale);
         }
     }
 
@@ -796,6 +796,23 @@ static void DrawLine(Obj canvas, float x1, float y1, float x2, float y2, uint32_
     CallFn(canvas, fnDraw2DLine, parms);
 }
 
+// Projects a point in this eye's view space (x right, y up, z forward) onto the canvas, with the
+// same projection the engine renders this eye with (symmetric, or the eye's own off-centre one).
+static void EyeToScreen(int eye, float x, float y, float z, float clipX, float clipY, float& sx, float& sy) {
+    float nx, ny;
+    if (vr::S.asymmetric) {
+        const vr::EyeInfo& e = vr::S.eye[eye];
+        nx = e.projX * x / z + e.offX;
+        ny = e.projY * y / z + e.offY;
+    } else {
+        float tanH = vr::S.tanH, tanV = tanH * clipY / clipX;
+        nx = x / (z * tanH);
+        ny = y / (z * tanV);
+    }
+    sx = (nx * 0.5f + 0.5f) * clipX;
+    sy = (0.5f - ny * 0.5f) * clipY;
+}
+
 static void DrawAimDot(Obj hud) {
     Obj pc = Pc();
     Obj pawn = PawnOf(pc);
@@ -832,9 +849,8 @@ static void DrawAimDot(Obj hud) {
     if (z < 1.0f) return;
     float clipX = At<float>(canvas, oCanvasClipX), clipY = At<float>(canvas, oCanvasClipY);
     if (clipX < 16 || clipY < 16) return;
-    float tanH = vr::S.tanH, tanV = tanH * clipY / clipX;
-    float sx = (Dot(v, r) / (z * tanH) * 0.5f + 0.5f) * clipX;
-    float sy = (0.5f - Dot(v, u) / (z * tanV) * 0.5f) * clipY;
+    float sx, sy;
+    EyeToScreen(g_eye, Dot(v, r), Dot(v, u), z, clipX, clipY, sx, sy);
     static int dbg = 0;
     if (dbg++ < 2)
         Log("aimdot: eye %d canvas %p clip %.0fx%.0f hit (%.1f %.1f %.1f) cam (%.1f %.1f %.1f) z %.1f screen %.1f,%.1f", g_eye, canvas, clipX,
@@ -868,7 +884,6 @@ static void DrawTileOutline(Obj hud) {
     FRotator camRot;
     PoseToWorld(eye, base, camLoc, camRot);
     Vec3 cf = DirToWorld(eye.Forward()), cr = DirToWorld(eye.Right()), cu = DirToWorld(eye.Up());
-    float tanH = vr::S.tanH, tanV = tanH * clipY / clipX;
     const float nearZ = 2.0f;
     for (auto& l : g_tileLines) {
         Vec3 a(l.a.x - camLoc.x, l.a.y - camLoc.y, l.a.z - camLoc.z), b(l.b.x - camLoc.x, l.b.y - camLoc.y, l.b.z - camLoc.z);
@@ -877,8 +892,9 @@ static void DrawTileOutline(Obj hud) {
         // Clip the segment against the near plane.
         if (za < nearZ) { float t = (nearZ - za) / (zb - za); a = a + (b - a) * t; za = nearZ; }
         if (zb < nearZ) { float t = (nearZ - zb) / (za - zb); b = b + (a - b) * t; zb = nearZ; }
-        float ax = (Dot(a, cr) / (za * tanH) * 0.5f + 0.5f) * clipX, ay = (0.5f - Dot(a, cu) / (za * tanV) * 0.5f) * clipY;
-        float bx = (Dot(b, cr) / (zb * tanH) * 0.5f + 0.5f) * clipX, by = (0.5f - Dot(b, cu) / (zb * tanV) * 0.5f) * clipY;
+        float ax, ay, bx, by;
+        EyeToScreen(g_eye, Dot(a, cr), Dot(a, cu), za, clipX, clipY, ax, ay);
+        EyeToScreen(g_eye, Dot(b, cr), Dot(b, cu), zb, clipX, clipY, bx, by);
         DrawLine(canvas, ax, ay, bx, by, l.color);
     }
 }
@@ -1293,6 +1309,97 @@ static bool UnderClass(Obj fn, Obj cls) {
     return false;
 }
 
+
+// --- Projections: asymmetric per-eye frustum (AsymmetricFrustum=1) and diagnostics ---------
+// FPerspectiveMatrix constructors in UDK.exe 7977 (found by disassembly). The main view's
+// projection is built by ULocalPlayer::CalcSceneView through the 6-parameter one, returning to
+// kMainViewCaller, once per eye. Scene capture components build theirs inline (kCaptureProj:
+// this+0xF0 from FOV +0x94, near +0x98, far +0x9C). With AsymmetricFrustum, both get each eye's
+// own off-centre frustum, so the captures composited in screen space still line up.
+static constexpr uintptr_t kPerspective4 = 0x00A43FE0; // (HalfFOV, Width, Height, MinZ), infinite far plane
+static constexpr uintptr_t kPerspective6 = 0x00A43F10; // (HalfFOVX, HalfFOVY, MultFOVX, MultFOVY, MinZ, MaxZ)
+static constexpr uintptr_t kMainViewCaller = 0x00A5DB48;
+static constexpr uintptr_t kCaptureProj = 0x00A682A0;
+typedef void*(__fastcall* Persp4_t)(void*, void*, float, float, float, float);
+typedef void*(__fastcall* Persp6_t)(void*, void*, float, float, float, float, float, float);
+typedef void(__fastcall* CapProj_t)(void*, void*);
+static Persp4_t oPersp4;
+static Persp6_t oPersp6;
+static CapProj_t oCapProj;
+static bool g_inStereoCapture = false; // inside the per-eye capture update issued by hkViewportDraw
+
+// Row-vector matrix (UE3): ndcX = M[0][0] * x/z + M[2][0], ndcY = M[1][1] * y/z + M[2][1].
+static void ApplyEyeProjection(float* m, int eye) {
+    const vr::EyeInfo& e = vr::S.eye[eye];
+    m[0] = e.projX;
+    m[5] = e.projY;
+    m[8] = e.offX;
+    m[9] = e.offY;
+}
+
+// Diagnostics: each distinct caller is logged once (with its parameters and the eye).
+static CRITICAL_SECTION g_projCs;
+static std::unordered_set<uintptr_t>* g_projSeen;
+static bool ProjFirst(uintptr_t key) {
+    if (!g_cfg.debugProjection) return false;
+    EnterCriticalSection(&g_projCs);
+    bool first = g_projSeen->size() < 200 && g_projSeen->insert(key).second;
+    LeaveCriticalSection(&g_projCs);
+    return first;
+}
+static void* __fastcall hkPersp4(void* self, void* edx, float halfFov, float w, float h, float minZ) {
+    void* r = oPersp4(self, edx, halfFov, w, h, minZ);
+    if (ProjFirst((uintptr_t)__builtin_return_address(0)))
+        Log("proj4: caller %p eye %d thread %lu halfFov %.4f (%.1f deg) w %.1f h %.1f minZ %.2f", __builtin_return_address(0), g_eye,
+            GetCurrentThreadId(), halfFov, halfFov * 360.0f / 3.14159265f, w, h, minZ);
+    return r;
+}
+static void* __fastcall hkPersp6(void* self, void* edx, float hx, float hy, float mx, float my, float minZ, float maxZ) {
+    void* r = oPersp6(self, edx, hx, hy, mx, my, minZ, maxZ);
+    uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+    if (vr::S.asymmetric && g_eye >= 0 && caller == kMainViewCaller) ApplyEyeProjection((float*)self, g_eye);
+    if (ProjFirst(caller))
+        Log("proj6: caller %p eye %d thread %lu halfFovX %.4f halfFovY %.4f multX %.3f multY %.3f minZ %.2f maxZ %.1f",
+            (void*)caller, g_eye, GetCurrentThreadId(), hx, hy, mx, my, minZ, maxZ);
+    return r;
+}
+static void __fastcall hkCapProj(void* self, void* edx) {
+    oCapProj(self, edx);
+    float* m = (float*)((uint8_t*)self + 0xF0);
+    if (vr::S.asymmetric && g_eye >= 0 && g_inStereoCapture) ApplyEyeProjection(m, g_eye);
+    if (ProjFirst((uintptr_t)self ^ (uintptr_t)__builtin_return_address(0) ^ (g_inStereoCapture ? 1 : 0)))
+        Log("capproj: %s caller %p eye %d stereo %d fov %.1f near %.1f far %.1f flags %02X | M00 %.3f M11 %.3f M20 %.3f M21 %.3f M22 %.3f M23 %.3f M32 %.3f",
+            ue::FullName((Obj)self).c_str(), __builtin_return_address(0), g_eye, g_inStereoCapture, *(float*)((uint8_t*)self + 0x94),
+            *(float*)((uint8_t*)self + 0x98), *(float*)((uint8_t*)self + 0x9C), *((uint8_t*)self + 0xA0), m[0], m[5], m[8], m[9], m[10],
+            m[11], m[14]);
+}
+static bool InstallProjectionHooks() {
+    static const uint8_t sig4[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x83, 0xEC, 0x10, 0xD9, 0x45, 0x08};
+    static const uint8_t sig6[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0xF3, 0x0F, 0x10, 0x55, 0x18};
+    static const uint8_t sigC[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x83, 0xEC, 0x58, 0x56, 0x8B, 0xF1};
+    // The main-view call site: a call to kPerspective6 just before kMainViewCaller.
+    const uint8_t* site = (const uint8_t*)kMainViewCaller - 5;
+    bool siteOk = site[0] == 0xE8 && (uintptr_t)(kMainViewCaller + *(const int32_t*)(site + 1)) == kPerspective6;
+    if (memcmp((void*)kPerspective4, sig4, sizeof(sig4)) || memcmp((void*)kPerspective6, sig6, sizeof(sig6)) ||
+        memcmp((void*)kCaptureProj, sigC, sizeof(sigC)) || !siteOk) {
+        Log("proj: signature mismatch (main-view call site %s), projection hooks off", siteOk ? "ok" : "not found");
+        return false;
+    }
+    InitializeCriticalSection(&g_projCs);
+    g_projSeen = new std::unordered_set<uintptr_t>();
+    bool ok = MH_CreateHook((void*)kPerspective4, (void*)hkPersp4, (void**)&oPersp4) == MH_OK &&
+              MH_CreateHook((void*)kPerspective6, (void*)hkPersp6, (void**)&oPersp6) == MH_OK &&
+              MH_CreateHook((void*)kCaptureProj, (void*)hkCapProj, (void**)&oCapProj) == MH_OK &&
+              MH_EnableHook((void*)kPerspective4) == MH_OK && MH_EnableHook((void*)kPerspective6) == MH_OK &&
+              MH_EnableHook((void*)kCaptureProj) == MH_OK;
+    for (int e = 0; e < 2; e++) {
+        const auto& t = vr::S.eye[e];
+        Log("proj: eye %d tan L%.3f R%.3f U%.3f D%.3f -> scale %.3f/%.3f offset %.3f/%.3f", e, t.tanLeft, t.tanRight, t.tanUp, t.tanDown,
+            t.projX, t.projY, t.offX, t.offY);
+    }
+    Log("proj: hooks %s (asymmetric %d, diagnostics %d)", ok ? "installed" : "failed", vr::S.asymmetric, g_cfg.debugProjection);
+    return ok;
+}
 static bool Init() {
     if (!ue::Init(false)) return false;
     bool ok = true;
@@ -1342,6 +1449,9 @@ static bool Init() {
     if (!memcmp((void*)kIgnoreOcclusionWrite, kIgnoreOcclusionSig, sizeof(kIgnoreOcclusionSig))) {
         g_ignoreOcclusion = (int*)0x025ADF7C;
         g_savedOcclusion = *g_ignoreOcclusion;
+        // OcclusionQueries=0: the engine treats everything in the frustum as visible and skips the
+        // queries (fewer GPU round trips and draw calls to issue on the render thread).
+        if (!g_cfg.occlusionQueries) g_savedOcclusion = *g_ignoreOcclusion = 1;
     }
     Log("init: right-eye occlusion fix %s", g_ignoreOcclusion ? "available" : "unavailable (unexpected build)");
     if (!memcmp((void*)kFrameCounterInc, kFrameCounterSig, sizeof(kFrameCounterSig))) g_frameCounter = (uint64_t*)0x024E1968;
@@ -1478,6 +1588,13 @@ static bool Init() {
     }
     Log("init: game hooks installed, fov %.1f", vr::S.fovDeg);
     shading::Init(CallFn);
+    if (vr::S.asymmetric || g_cfg.debugProjection) {
+        if (!InstallProjectionHooks() && vr::S.asymmetric) {
+            // Without the projection hooks the per-eye frustum cannot be applied: back to symmetric.
+            g_cfg.asymmetricFrustum = false;
+            vr::ComputeFrustum();
+        }
+    }
     if (g_cfg.debugTile) {
         int nObj = ue::NumObjects();
         for (int i = 0; i < nObj; i++) {
@@ -1548,7 +1665,9 @@ static void __fastcall hkViewportDraw(void* self, void* edx, int bShouldPresent)
         if (g_capFn && g_capSelf == Pc() && g_cfg.stereoCaptures) {
             uint8_t parms[128];
             memset(parms, 0, sizeof(parms));
+            g_inStereoCapture = true;
             CallFn(g_capSelf, g_capFn, parms); // parameters are filled in by the hook for this eye
+            g_inStereoCapture = false;
         }
         d3dhook::PushEye(eye, pose, d3dhook::NoteDraw());
         LARGE_INTEGER a, b;

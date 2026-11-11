@@ -23,6 +23,8 @@ struct Config {
     bool crosshair = true;
     bool stereoCaptures = true;    // place the game's screen-space scene captures per eye
     bool eyeOcclusionFix = false;  // ignore occlusion queries for the right eye
+    bool occlusionQueries = true;   // false: skip the engine's occlusion queries in both eyes (render-thread cost)
+    bool asymmetricFrustum = false; // each eye renders only its own off-centre frustum (fewer pixels and objects)
     bool eyeFrameAdvance = false;  // each eye counts as its own engine frame (per-frame captures, outlines)
     bool eyeTileFix = true;       // redraw the block placement outline (one-render debug lines) for the right eye
     bool dynamicShadows = true;   // the game's screen-space hatched shadows (look wrong in stereo)
@@ -40,6 +42,7 @@ struct Config {
     bool debugTile = false;        // log how the block placement preview is shown (diagnostics)
     bool debugFireTrace = false;   // log the script functions that run while the gun trigger is held
     bool debugProfile = false;     // log the UnrealScript functions that cost the most game-thread time
+    bool debugProjection = false;  // log which code builds each perspective projection (asymmetric rendering research)
     // Development aids (fake-headset testing)
     int debugJumpNode = -1;       // map node to jump to after start-up (as if clicked on the map wall)
     float debugFakeYaw = 0, debugFakePitch = 0; // fake head orientation (degrees)

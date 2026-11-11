@@ -72,6 +72,8 @@ void LoadConfig() {
         KB("Crosshair", crosshair);
         KB("StereoCaptures", stereoCaptures);
         KB("EyeOcclusionFix", eyeOcclusionFix);
+        KB("OcclusionQueries", occlusionQueries);
+        KB("AsymmetricFrustum", asymmetricFrustum);
         KB("EyeFrameAdvance", eyeFrameAdvance);
         KB("EyeTileFix", eyeTileFix);
         KB("DynamicShadows", dynamicShadows);
@@ -89,6 +91,7 @@ void LoadConfig() {
         KB("DebugTile", debugTile);
         KB("DebugFireTrace", debugFireTrace);
         KB("DebugProfile", debugProfile);
+        KB("DebugProjection", debugProjection);
         KI("DebugJumpNode", debugJumpNode);
         KF("DebugFakeYaw", debugFakeYaw);
         KF("DebugFakePitch", debugFakePitch);

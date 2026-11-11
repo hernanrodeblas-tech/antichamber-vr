@@ -351,6 +351,10 @@ public sealed class MainForm : Form
             T("Submits each frame one frame later so the CPU never waits for the GPU. More fps on slow systems (Steam Frame), one frame more latency.",
               "Envía cada fotograma uno más tarde para que la CPU no espere a la GPU. Más fps en equipos lentos (Steam Frame), un fotograma más de latencia."));
         BindBool("Avanzado", "PipelineFrames", "0", "1 = CPU y GPU trabajan a la vez (mas fps, un fotograma mas de latencia)", pf);
+        var af = Check(grid, T("Per-eye frustum", "Campo de visión por ojo"),
+            T("Each eye renders only its own field of view: about 28% fewer pixels and fewer objects to draw.",
+              "Cada ojo dibuja solo su propio campo de visión: un 28% menos de píxeles y menos objetos que dibujar."));
+        BindBool("VR", "AsymmetricFrustum", "0", "1 = cada ojo dibuja solo su parte del campo de vision", af);
         var br = Combo(grid, T("Image hand-off to SteamVR", "Paso de imagen a SteamVR"),
             T("Automatic tries each method in turn. Only change it if the log reports a problem.",
               "Automático prueba cada método por orden. Cámbialo solo si el registro indica un problema."),

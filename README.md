@@ -64,8 +64,9 @@ The launcher is not used there; the settings come from a ready-made ini.
 6. Back in the headset, start Antichamber from the library.
 
 The Frame preset renders at SteamVR's recommended resolution, turns the dynamic shadows off (by far the biggest cost
-there) and sets `PipelineFrames=1` so the CPU and GPU work in parallel. Expect 45–72 fps in light rooms and 30–45 in
-heavy ones, smoothed by SteamVR's reprojection; 72 Hz and 90 Hz both work. To change a setting, edit
+there), sets `PipelineFrames=1` so the CPU and GPU work in parallel and `AsymmetricFrustum=1` so each eye renders only
+its own field of view. At 90 Hz it holds 45 fps most of the time (light rooms reach 72 at 72 Hz), smoothed by
+SteamVR's reprojection; 72 Hz and 90 Hz both work. To change a setting, edit
 `Binaries/Win32/antichamber_vr.ini` (same keys as the launcher). If something goes wrong, the log is
 `Binaries/Win32/antichamber_vr.log`.
 
@@ -104,6 +105,7 @@ Everything is in the launcher, which writes `Binaries\Win32\antichamber_vr.ini`.
 | `GunScale`, `GunOffsetX/Y/Z`, `AimPitchOffset` | Gun model and aiming |
 | `DynamicShadows`, `MotionBlur` | The game's dynamic shadows; camera motion blur (off by default) |
 | `PipelineFrames` | CPU and GPU work in parallel: more fps on slow systems, one frame more latency |
+| `AsymmetricFrustum` | Each eye renders only its own field of view: ~28% fewer pixels and fewer objects to draw |
 | `D3DBridge` | How images reach SteamVR (automatic by default) |
 
 ## Known limitations
@@ -188,8 +190,9 @@ se usa el launcher; la configuración viene en un ini preparado.
 6. Vuelve al visor y abre Antichamber desde la biblioteca.
 
 El ini de las Frame usa la resolución recomendada por SteamVR, desactiva las sombras dinámicas (con diferencia lo que
-más cuesta allí) y activa `PipelineFrames=1` para que CPU y GPU trabajen a la vez. Cuenta con 45–72 fps en salas
-ligeras y 30–45 en las pesadas, suavizados por la reproyección de SteamVR; funciona a 72 Hz y a 90 Hz. Para cambiar
+más cuesta allí), activa `PipelineFrames=1` para que CPU y GPU trabajen a la vez y `AsymmetricFrustum=1` para que cada
+ojo dibuje solo su propio campo de visión. A 90 Hz se mantiene casi siempre a 45 fps (las salas ligeras llegan a 72 a
+72 Hz), suavizados por la reproyección de SteamVR; funciona a 72 Hz y a 90 Hz. Para cambiar
 algo, edita `Binaries/Win32/antichamber_vr.ini` (las mismas claves que el launcher). El registro está en
 `Binaries/Win32/antichamber_vr.log`.
 

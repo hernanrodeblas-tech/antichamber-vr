@@ -76,7 +76,7 @@ static Mat34 FromHmd(const HmdMatrix34_t& m) {
     return r;
 }
 
-static void ComputeFrustum() {
+void ComputeFrustum() {
     float tanH = 0, tanV = 0;
     for (int e = 0; e < 2; e++) {
         EyeInfo& ei = S.eye[e];
@@ -108,10 +108,45 @@ static void ComputeFrustum() {
         h *= g_cfg.maxRenderWidth / w;
         w = (float)g_cfg.maxRenderWidth;
     }
+    for (int e = 0; e < 2; e++) {
+        EyeInfo& ei = S.eye[e];
+        ei.projX = 1.0f / tanH;
+        ei.projY = 1.0f / tanV;
+        ei.offX = ei.offY = 0;
+    }
+    S.lineTanH = tanH;
+    S.lineTanV = tanV;
+    S.asymmetric = g_cfg.asymmetricFrustum && !S.fake;
+    if (S.asymmetric) {
+        // Each eye renders exactly its own (off-centre) frustum on the whole image: no pixels
+        // outside the lens are drawn, and the engine culls everything outside that frustum. The
+        // recommended size already covers one eye's frustum at the right pixel density.
+        w = S.recW * g_cfg.resolutionScale;
+        h = S.recH * g_cfg.resolutionScale;
+        if (g_cfg.maxRenderWidth > 0 && w > g_cfg.maxRenderWidth) {
+            h *= g_cfg.maxRenderWidth / w;
+            w = (float)g_cfg.maxRenderWidth;
+        }
+        float lh = 0, lv = 0;
+        for (int e = 0; e < 2; e++) {
+            EyeInfo& ei = S.eye[e];
+            float wx = ei.tanLeft + ei.tanRight, wy = ei.tanUp + ei.tanDown;
+            ei.projX = 2.0f / wx;
+            ei.offX = (ei.tanLeft - ei.tanRight) / wx;
+            ei.projY = 2.0f / wy;
+            ei.offY = (ei.tanDown - ei.tanUp) / wy;
+            ei.uMin = ei.vMin = 0;
+            ei.uMax = ei.vMax = 1;
+            lh += wx * 0.25f;
+            lv += wy * 0.25f;
+        }
+        S.lineTanH = lh;
+        S.lineTanV = lv;
+    }
     S.renderW = ((uint32_t)(w + 0.5f) + 3) & ~3u;
     S.renderH = ((uint32_t)(h + 0.5f) + 3) & ~3u;
-    Log("vr: recommended %ux%u, symmetric tanH=%.3f tanV=%.3f fov=%.1f, render %ux%u", S.recW, S.recH, tanH, tanV, S.fovDeg,
-        S.renderW, S.renderH);
+    Log("vr: recommended %ux%u, symmetric tanH=%.3f tanV=%.3f fov=%.1f, render %ux%u%s", S.recW, S.recH, tanH, tanV, S.fovDeg,
+        S.renderW, S.renderH, S.asymmetric ? " (asymmetric per-eye frustum)" : "");
     for (int e = 0; e < 2; e++)
         Log("vr: eye %d tan L%.3f R%.3f U%.3f D%.3f bounds u[%.3f,%.3f] v[%.3f,%.3f] offset(%.4f,%.4f,%.4f)", e, S.eye[e].tanLeft,
             S.eye[e].tanRight, S.eye[e].tanUp, S.eye[e].tanDown, S.eye[e].uMin, S.eye[e].uMax, S.eye[e].vMin, S.eye[e].vMax,
