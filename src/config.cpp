@@ -75,14 +75,20 @@ void LoadConfig() {
         KB("EyeFrameAdvance", eyeFrameAdvance);
         KB("EyeTileFix", eyeTileFix);
         KB("DynamicShadows", dynamicShadows);
+        KB("MotionBlur", motionBlur);
+        else if (!_stricmp(key, "EngineSettings")) { strncpy(g_cfg.engineSettings, val, sizeof(g_cfg.engineSettings) - 1); }
         KB("LineworkFix", lineworkFix);
         KB("ResizeScreenTargets", resizeScreenTargets);
         KF("CaptureScale", captureScale);
         KF("LineworkScale", lineworkScale);
         KB("FixPhysX", fixPhysX);
+        KI("D3DBridge", d3dBridge);
+        KB("PipelineFrames", pipelineFrames);
         KI("DebugDumpFrame", debugDumpFrame);
         KB("DebugLog", debugLog);
         KB("DebugTile", debugTile);
+        KB("DebugFireTrace", debugFireTrace);
+        KB("DebugProfile", debugProfile);
         KI("DebugJumpNode", debugJumpNode);
         KF("DebugFakeYaw", debugFakeYaw);
         KF("DebugFakePitch", debugFakePitch);

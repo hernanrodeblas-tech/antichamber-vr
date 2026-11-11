@@ -162,3 +162,23 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 
 - `PlayMode=Seated`: la vista se coloca a `SeatedEyeHeight` metros (calibrado al arrancar).
 - **Stick derecho pulsado** (o **F8**): recentra el cuerpo bajo la cabeza y, sentado, recalibra la altura.
+
+## Versión 1.1: Steam Frame sin PC (Proton + FEX)
+
+- **Arranque:** con Proton 11.0 (ARM64) el juego se cierra al cargar los paquetes de inicio (aserción de `Array.h`),
+  también sin el mod. Con **Proton Experimental** funciona.
+- **Script de instalación de Steam:** el instalador de PhysX 9.10 (2010) nunca termina bajo Proton/FEX. Se sustituye
+  por `steamframe/noop_installer.c` (no hace nada y devuelve éxito); el mod ya fuerza el PhysX del propio juego.
+- **Carga del mod:** opción de lanzamiento `WINEDLLOVERRIDES="d3d9=n,b" %command%`.
+- **Paso de imagen:** en DXVK falla `OpenSharedResource` de una textura compartida de D3D9Ex (80070057). El mod prueba
+  ahora tres métodos por orden (`D3DBridge`): D3D9 → D3D11, D3D11 → D3D9 (el que funciona en Proton) y copia por
+  memoria.
+- **Rendimiento** (medido con las líneas `perf:` del log):
+  - Al principio ~30 fps, con ~10 ms por fotograma de CPU esperando a la GPU. `PipelineFrames=1` envía cada fotograma
+    uno más tarde (tres juegos de texturas en anillo) y elimina esa espera.
+  - Bajar la resolución no cambiaba nada: SteamVR fija la app a la mitad de la frecuencia cuando no llega a tiempo.
+  - Lo que de verdad costaba eran las **sombras dinámicas**: cada luz vuelve a dibujar la escena desde la luz y por
+    ojo. Sin ellas, las salas ligeras van a 72 fps y la media pasa de ~35 a ~50.
+  - Sin efecto medible: `StereoCaptures=0`, profundidad de campo, oclusión ambiental, rayos de luz y destellos.
+    Los scripts del juego suman 2–4 ms por fotograma (`DebugProfile=1`).
+- Configuración para las Frame: `config/antichamber_vr_steamframe.ini`.

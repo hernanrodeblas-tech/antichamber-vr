@@ -28,6 +28,9 @@ $CXX -shared -static -o $OUT/d3d9.dll $OBJS src/d3d9.def \
     -Wl,--kill-at -Wl,--enable-stdcall-fixup -ld3d11 -ldxgi -ldxguid -luuid -luser32 -lgdi32 -lwinmm
 echo "built $OUT/d3d9.dll"
 
+# Steam Frame helper: a stand-in for the PhysX installer that hangs under Proton/FEX.
+$CC -O2 -s -mwindows steamframe/noop_installer.c -o $OUT/noop_installer.exe
+
 if [ "$1" = "install" ]; then
     DEST=../Binaries/Win32
     cp $OUT/d3d9.dll $DEST/d3d9.dll

@@ -14,6 +14,7 @@ void PushEye(int eye, const Mat34& hmdPose, unsigned drawOrdinal); // tag that d
 unsigned StereoFrames();
 void BackBufferSize(unsigned& w, unsigned& h); // size of the game's current back buffer
 void BeginDesktopSpoof();
-void RequestShot();                          // save both eye images on the next stereo frame                    // let the next resolution change exceed the desktop size
+void RequestShot();                          // save both eye images on the next stereo frame
+DWORD RenderThreadId();                      // thread that presents (the engine's render thread)
 
 } // namespace d3dhook

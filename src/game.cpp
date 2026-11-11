@@ -17,6 +17,9 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <unordered_map>
+#include <vector>
+#include <algorithm>
 #include <vector>
 
 namespace dbgdump { void Run(ue::Obj pc, ue::Obj localPlayer, int boolMaskOff); void DumpObject(ue::Obj o, const char* tag, int boolMaskOff); void XrefTile(); }
@@ -406,6 +409,34 @@ static void OneTimeSetup(Obj pc) {
         ConsoleCommand(pc, L"scale set DynamicShadows False");
         ConsoleCommand(pc, L"scale set LightEnvironmentShadows False");
     }
+    if (!g_cfg.motionBlur) {
+        // Camera motion blur smears the image on every head movement: never wanted in VR.
+        ConsoleCommand(pc, L"scale set MotionBlur False");
+        ConsoleCommand(pc, L"scale set MotionBlurPause False");
+    }
+    // Extra engine scalability settings from the ini: "Name=Value, Name=Value".
+    for (const char* p = g_cfg.engineSettings; *p;) {
+        while (*p == ' ' || *p == ',') p++;
+        const char* end = p;
+        while (*end && *end != ',') end++;
+        char item[96] = {};
+        size_t n = (size_t)(end - p) < sizeof(item) - 1 ? (size_t)(end - p) : sizeof(item) - 1;
+        memcpy(item, p, n);
+        p = end;
+        char* eq = strchr(item, '=');
+        if (!eq) continue;
+        *eq = 0;
+        char* name = item;
+        char* value = eq + 1;
+        while (*name == ' ') name++;
+        while (*value == ' ') value++;
+        for (char* e = name + strlen(name); e > name && e[-1] == ' ';) *--e = 0;
+        for (char* e = value + strlen(value); e > value && e[-1] == ' ';) *--e = 0;
+        if (!*name || !*value) continue;
+        wchar_t cmd[160];
+        swprintf(cmd, 160, L"scale set %hs %hs", name, value);
+        ConsoleCommand(pc, cmd);
+    }
     float* nearClip = (float*)kNearClipPlane;
     if (*nearClip > 9.5f && *nearClip < 10.5f && g_cfg.nearClip > 0.1f) {
         *nearClip = g_cfg.nearClip;
@@ -428,7 +459,9 @@ static void Edge(bool now, bool& prev, Obj pc, Obj onPress, Obj onRelease) {
     CallNoArgs(pc, now ? onPress : onRelease);
 }
 
+static DWORD g_gameThread;
 static void PreTick(Obj pc, float dt) {
+    g_gameThread = GetCurrentThreadId();
     g_tileLines.clear();
     g_capFn = nullptr;
     bool quit = false;
@@ -852,8 +885,24 @@ static void DrawTileOutline(Obj hud) {
 
 // --- Script interpreter hook ------------------------------------------------------
 
-static void __fastcall hkProcessInternal(void* self, void* edx, uint8_t* stack, void* result) {
+static void __fastcall hkProcessInternalInner(void* self, void* edx, uint8_t* stack, void* result) {
     void* node = *(void**)(stack + kFrameNode);
+    if (g_cfg.debugFireTrace) {
+        // Development aid: the script functions that run while the gun trigger is held (each
+        // listed once, with the class of the object running it), to see how the game handles a
+        // held fire button (e.g. dragging blocks).
+        static std::unordered_set<std::string> seen;
+        static bool wasFiring = false;
+        if (g_prevFire != wasFiring) {
+            wasFiring = g_prevFire;
+            Log("firetrace: trigger %s", g_prevFire ? "pressed" : "released");
+        }
+        if (g_prevFire && seen.size() < 600) {
+            std::string fn = ue::FullName((Obj)node);
+            if (fn.find("Hazard") != std::string::npos && seen.insert(fn).second)
+                Log("firetrace: %s (on %s)", fn.c_str(), ue::ObjName(ue::ClassOf((Obj)self)).c_str());
+        }
+    }
     if (node == fnGPVP) {
         oProcessInternal(self, edx, stack, result);
         FVector loc;
@@ -1172,6 +1221,55 @@ static void __fastcall hkProcessInternal(void* self, void* edx, uint8_t* stack, 
     oProcessInternal(self, edx, stack, result);
 }
 
+// --- Script profiler (DebugProfile=1) ---------------------------------------------------
+// Exclusive time spent in each UnrealScript function on the game thread, reported with the
+// game-thread timing, to find the scripts that cost the most under emulation.
+struct ProfEntry {
+    LONGLONG excl = 0;
+    unsigned calls = 0;
+};
+static std::unordered_map<void*, ProfEntry> g_prof;
+static struct { void* node; LONGLONG start, child; } g_pstack[256];
+static int g_pdepth = 0;
+
+
+static void __fastcall hkProcessInternal(void* self, void* edx, uint8_t* stack, void* result) {
+    if (!g_cfg.debugProfile || GetCurrentThreadId() != g_gameThread || g_pdepth >= 255) {
+        hkProcessInternalInner(self, edx, stack, result);
+        return;
+    }
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    int d = g_pdepth++;
+    g_pstack[d] = {*(void**)(stack + kFrameNode), t0.QuadPart, 0};
+    hkProcessInternalInner(self, edx, stack, result);
+    QueryPerformanceCounter(&t1);
+    g_pdepth = d;
+    LONGLONG total = t1.QuadPart - t0.QuadPart;
+    ProfEntry& e = g_prof[g_pstack[d].node];
+    e.excl += total - g_pstack[d].child;
+    e.calls++;
+    if (d > 0) g_pstack[d - 1].child += total;
+}
+
+static void ProfileReport() {
+    if (!g_cfg.debugProfile || g_prof.empty()) return;
+    LARGE_INTEGER qpf;
+    QueryPerformanceFrequency(&qpf);
+    std::vector<std::pair<LONGLONG, void*>> v;
+    LONGLONG all = 0;
+    for (auto& kv : g_prof) {
+        v.push_back({kv.second.excl, kv.first});
+        all += kv.second.excl;
+    }
+    std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    const double perFrame = 1000.0 / qpf.QuadPart / 360.0; // reports cover 360 frames
+    Log("profile: scripts %.2f ms per frame in total; top functions (exclusive ms per frame, calls per frame):", all * perFrame);
+    for (size_t i = 0; i < v.size() && i < 15; i++)
+        Log("profile:   %.3f ms  %5.1f  %s", v[i].first * perFrame, g_prof[v[i].second].calls / 360.0, ue::FullName((Obj)v[i].second).c_str());
+    g_prof.clear();
+}
+
 // --- Initialisation -----------------------------------------------------------------
 
 static Obj MustFind(const char* name, bool& ok) {
@@ -1415,6 +1513,18 @@ static void __fastcall hkViewportDraw(void* self, void* edx, int bShouldPresent)
         oViewportDraw(self, edx, bShouldPresent);
         return;
     }
+    // Game-thread timing (the render thread's is logged by d3dhook): how long each eye's
+    // FViewport::Draw takes here, and the rest of the game frame (tick, scripts, physics).
+    static LARGE_INTEGER qpf, tLast;
+    static double sumFrame, sumDraw[2];
+    static unsigned frames;
+    if (!qpf.QuadPart) QueryPerformanceFrequency(&qpf);
+    LARGE_INTEGER tStart;
+    QueryPerformanceCounter(&tStart);
+    auto ms = [](LONGLONG a, LONGLONG b) { return (b - a) * 1000.0 / qpf.QuadPart; };
+    if (tLast.QuadPart) sumFrame += ms(tLast.QuadPart, tStart.QuadPart);
+    tLast = tStart;
+
     vr::Frame f;
     vr::GetFrame(f);
     if (f.hmdValid) g_frame = f;
@@ -1441,7 +1551,39 @@ static void __fastcall hkViewportDraw(void* self, void* edx, int bShouldPresent)
             CallFn(g_capSelf, g_capFn, parms); // parameters are filled in by the hook for this eye
         }
         d3dhook::PushEye(eye, pose, d3dhook::NoteDraw());
+        LARGE_INTEGER a, b;
+        QueryPerformanceCounter(&a);
         oViewportDraw(self, edx, bShouldPresent);
+        QueryPerformanceCounter(&b);
+        sumDraw[eye] += ms(a.QuadPart, b.QuadPart);
+    }
+    if (++frames == 360) {
+        double fr = sumFrame / (frames - 1), d0 = sumDraw[0] / frames, d1 = sumDraw[1] / frames;
+        // CPU time actually used by each thread (waiting excluded), per frame: tells which
+        // thread really limits the frame rate.
+        auto cpuMs = [](DWORD tid) -> double {
+            if (!tid) return 0;
+            HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+            if (!h) return 0;
+            FILETIME c, e, k, u;
+            double r = 0;
+            if (GetThreadTimes(h, &c, &e, &k, &u))
+                r = (((ULONGLONG)k.dwHighDateTime << 32 | k.dwLowDateTime) + ((ULONGLONG)u.dwHighDateTime << 32 | u.dwLowDateTime)) / 10000.0;
+            CloseHandle(h);
+            return r;
+        };
+        static double lastGame, lastRender;
+        double g = cpuMs(GetCurrentThreadId()), rnd = cpuMs(d3dhook::RenderThreadId());
+        if (lastGame > 0)
+            Log("perf cpu busy per frame: game thread %.1f ms, render thread %.1f ms (frame %.1f ms)", (g - lastGame) / frames,
+                (rnd - lastRender) / frames, fr);
+        lastGame = g;
+        lastRender = rnd;
+        Log("perf game thread: frame %.1f ms = draw left %.1f + draw right %.1f + rest (tick, scripts) %.1f", fr, d0, d1, fr - d0 - d1);
+        frames = 0;
+        sumFrame = sumDraw[0] = sumDraw[1] = 0;
+        tLast.QuadPart = 0;
+        ProfileReport();
     }
     g_eye = -1;
     if (g_ignoreOcclusion && g_cfg.eyeOcclusionFix) *g_ignoreOcclusion = g_savedOcclusion;

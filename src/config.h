@@ -26,14 +26,20 @@ struct Config {
     bool eyeFrameAdvance = false;  // each eye counts as its own engine frame (per-frame captures, outlines)
     bool eyeTileFix = true;       // redraw the block placement outline (one-render debug lines) for the right eye
     bool dynamicShadows = true;   // the game's screen-space hatched shadows (look wrong in stereo)
+    bool motionBlur = false;       // the engine's camera motion blur (never wanted in VR)
+    char engineSettings[256] = {}; // extra engine scalability settings: "Name=Value, Name=Value" (applied with "scale set")
     bool lineworkFix = true;      // scale the line detector's sampling distance to the headset FOV
     bool resizeScreenTargets = true; // let the game resize its capture textures to the headset resolution
     float captureScale = 1.0f;    // capture-texture size relative to the eye resolution (game default 0.75; 0 = leave as is)
     float lineworkScale = 1.0f;   // extra multiplier on that distance (lower = fewer false lines)
+    int d3dBridge = 0;            // first eye-image bridge to try: 0 shared D3D9->D3D11, 1 shared D3D11->D3D9, 2 system-memory copy
+    bool pipelineFrames = false;   // submit each frame one frame later so CPU and GPU overlap (more fps, one frame more latency)
     bool fixPhysX = true;
     int debugDumpFrame = 0;       // >0: dump both eye images at that stereo frame
     bool debugLog = false;
     bool debugTile = false;        // log how the block placement preview is shown (diagnostics)
+    bool debugFireTrace = false;   // log the script functions that run while the gun trigger is held
+    bool debugProfile = false;     // log the UnrealScript functions that cost the most game-thread time
     // Development aids (fake-headset testing)
     int debugJumpNode = -1;       // map node to jump to after start-up (as if clicked on the map wall)
     float debugFakeYaw = 0, debugFakePitch = 0; // fake head orientation (degrees)

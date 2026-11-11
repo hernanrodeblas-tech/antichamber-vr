@@ -10,3 +10,6 @@ launcher/obj/
 *.log
 vr_eye*.jpg
 vr_shot*.jpg
+
+# Trailer footage and renders
+video/

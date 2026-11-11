@@ -258,6 +258,9 @@ public sealed class MainForm : Form
         BindBool("VR", "Crosshair", "1", "1 = punto de apuntado 3D", xh);
         var ds = Check(grid, T("Dynamic shadows", "Sombras dinámicas"), T("The original game's dynamic shadows.", "Las sombras dinámicas del juego original."));
         BindBool("VR", "DynamicShadows", "1", "0 = apaga las sombras dinamicas", ds);
+        var mb = Check(grid, T("Camera motion blur", "Desenfoque de movimiento"),
+            T("The engine's motion blur. Off is recommended in VR.", "El desenfoque de movimiento del motor. Se recomienda desactivarlo en VR."));
+        BindBool("VR", "MotionBlur", "0", "0 = sin desenfoque de movimiento de camara", mb);
         var lw = Check(grid, T("Line and shading fix", "Corrección de líneas y sombras"),
             T("Fits the game's line detector to the headset FOV (prevents the striped shading).", "Ajusta el detector de líneas del juego al FOV del visor (evita el rayado)."));
         BindBool("VR", "LineworkFix", "1", "1 = ajusta el detector de lineas al FOV del visor", lw);
@@ -343,6 +346,17 @@ public sealed class MainForm : Form
             T("Forces the game's own PhysX 2.8.4.4 (prevents the crash on load with NVIDIA's PhysX installed).",
               "Fuerza el PhysX 2.8.4.4 del juego (evita el cierre al cargar con el PhysX de NVIDIA instalado)."));
         BindBool("Avanzado", "FixPhysX", "1", "fuerza el PhysX 2.8.4.4 del juego", px);
+        Header(grid, T("Performance", "Rendimiento"));
+        var pf = Check(grid, T("Overlap CPU and GPU", "CPU y GPU en paralelo"),
+            T("Submits each frame one frame later so the CPU never waits for the GPU. More fps on slow systems (Steam Frame), one frame more latency.",
+              "Envía cada fotograma uno más tarde para que la CPU no espere a la GPU. Más fps en equipos lentos (Steam Frame), un fotograma más de latencia."));
+        BindBool("Avanzado", "PipelineFrames", "0", "1 = CPU y GPU trabajan a la vez (mas fps, un fotograma mas de latencia)", pf);
+        var br = Combo(grid, T("Image hand-off to SteamVR", "Paso de imagen a SteamVR"),
+            T("Automatic tries each method in turn. Only change it if the log reports a problem.",
+              "Automático prueba cada método por orden. Cámbialo solo si el registro indica un problema."),
+            new[] { T("Automatic", "Automático"), T("Shared D3D11 texture", "Textura D3D11 compartida"), T("System-memory copy (slow)", "Copia por memoria (lenta)") });
+        Bind("Avanzado", "D3DBridge", "0", "0 = prueba los metodos de paso de imagen en orden; 2 = copia por memoria",
+            v => br.SelectedIndex = v == "2" ? 2 : v == "1" ? 1 : 0, () => br.SelectedIndex.ToString());
         Header(grid, "Experimental");
         var occ = Check(grid, T("Right eye without occlusion", "Ojo derecho sin oclusión"),
             T("The right eye ignores occlusion queries inherited from the left eye.", "El ojo derecho ignora las consultas de oclusión heredadas del izquierdo."));

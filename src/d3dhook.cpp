@@ -54,11 +54,26 @@ static IDirect3DDevice9* g_dev = nullptr;
 static HWND g_hwnd = nullptr;
 static WNDPROC g_origWndProc = nullptr;
 
-// Eye targets (render thread only, except the ready flag).
-static IDirect3DTexture9* g_eyeTex[2];
-static IDirect3DSurface9* g_eyeSurf[2];
-static ID3D11Texture2D* g_eyeTex11[2];
-static IDirect3DQuery9* g_query;
+// Eye targets (render thread only, except the ready flag). One set holds a stereo frame: both
+// eye images on the D3D9 side and the matching D3D11 textures handed to SteamVR. With
+// PipelineFrames=1 there are three sets in a ring: a finished frame is submitted one frame later,
+// so the CPU never sits idle waiting for the GPU to finish the frame it just queued.
+struct EyeSet {
+    IDirect3DTexture9* tex[2];
+    IDirect3DSurface9* surf[2];
+    ID3D11Texture2D* tex11[2];
+    IDirect3DSurface9* sys[2]; // bridge 2: system-memory copies of the eye images
+    IDirect3DQuery9* query;    // signals when the GPU has finished writing this set
+    Mat34 pose;                // head pose the set was rendered with
+    bool pending;              // finished on the CPU side, not submitted yet
+};
+static EyeSet g_sets[3];
+static int g_numSets = 1, g_cur = 0;
+// How the D3D9 eye images reach the D3D11 textures handed to SteamVR:
+//   0 = D3D9Ex shared texture opened in D3D11 (Windows)
+//   1 = D3D11 shared texture opened in D3D9Ex (some D3D9-on-Vulkan layers only share this way)
+//   2 = copy through system memory (slow; last resort)
+static int g_bridge = -1; // set from D3DBridge on first use
 static ID3D11Device* g_d3d11;
 static ID3D11DeviceContext* g_ctx11;
 static volatile bool g_stereoReady = false;
@@ -235,14 +250,23 @@ void BeginDesktopSpoof() {
 
 // --- Eye targets -----------------------------------------------------------
 
+template <typename T> static void SafeRelease(T*& p) {
+    if (p) { p->Release(); p = nullptr; }
+}
+
 static void ReleaseTargets() {
     g_stereoReady = false;
-    for (int e = 0; e < 2; e++) {
-        if (g_eyeTex11[e]) { g_eyeTex11[e]->Release(); g_eyeTex11[e] = nullptr; }
-        if (g_eyeSurf[e]) { g_eyeSurf[e]->Release(); g_eyeSurf[e] = nullptr; }
-        if (g_eyeTex[e]) { g_eyeTex[e]->Release(); g_eyeTex[e] = nullptr; }
+    for (EyeSet& s : g_sets) {
+        for (int e = 0; e < 2; e++) {
+            SafeRelease(s.tex11[e]);
+            SafeRelease(s.sys[e]);
+            SafeRelease(s.surf[e]);
+            SafeRelease(s.tex[e]);
+        }
+        SafeRelease(s.query);
+        s.pending = false;
     }
-    if (g_query) { g_query->Release(); g_query = nullptr; }
+    g_cur = 0;
 }
 
 static bool EnsureD3D11() {
@@ -268,42 +292,150 @@ static bool EnsureD3D11() {
     return true;
 }
 
+// Bridge 0: the eye textures are created by D3D9Ex as shared and opened by D3D11.
+static bool CreateTargets9to11(EyeSet& S, UINT w, UINT h) {
+    for (int e = 0; e < 2; e++) {
+        HANDLE shared = nullptr;
+        HRESULT hr = oCreateTexture(g_dev, w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &S.tex[e],
+                                    g_ex ? &shared : nullptr);
+        if (FAILED(hr)) {
+            Log("d3d: eye texture %d (%ux%u) creation failed %08lX", e, w, h, hr);
+            return false;
+        }
+        S.tex[e]->GetSurfaceLevel(0, &S.surf[e]);
+        if (vr::S.fake) continue;
+        hr = g_d3d11->OpenSharedResource(shared, __uuidof(ID3D11Texture2D), (void**)&S.tex11[e]);
+        if (FAILED(hr)) {
+            Log("d3d: OpenSharedResource for eye %d failed %08lX (handle %p)", e, hr, shared);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Bridge 1: the eye textures are created by D3D11 as shared and opened by D3D9Ex.
+static bool CreateTargets11to9(EyeSet& S, UINT w, UINT h) {
+    for (int e = 0; e < 2; e++) {
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = w;
+        td.Height = h;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        td.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+        HRESULT hr = g_d3d11->CreateTexture2D(&td, nullptr, &S.tex11[e]);
+        if (FAILED(hr)) {
+            Log("d3d: [11->9] D3D11 eye texture %d failed %08lX", e, hr);
+            return false;
+        }
+        IDXGIResource* res = nullptr;
+        HANDLE shared = nullptr;
+        if (SUCCEEDED(S.tex11[e]->QueryInterface(__uuidof(IDXGIResource), (void**)&res)) && res) {
+            hr = res->GetSharedHandle(&shared);
+            res->Release();
+        }
+        if (!shared) {
+            Log("d3d: [11->9] no shared handle for eye %d (%08lX)", e, hr);
+            return false;
+        }
+        hr = oCreateTexture(g_dev, w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &S.tex[e], &shared);
+        if (FAILED(hr)) {
+            Log("d3d: [11->9] D3D9 open of eye %d failed %08lX (handle %p)", e, hr, shared);
+            return false;
+        }
+        S.tex[e]->GetSurfaceLevel(0, &S.surf[e]);
+    }
+    return true;
+}
+
+// Bridge 2: plain D3D9 render targets, copied each frame through system memory into D3D11 textures.
+static bool CreateTargetsCpu(EyeSet& S, UINT w, UINT h) {
+    for (int e = 0; e < 2; e++) {
+        HRESULT hr = oCreateTexture(g_dev, w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &S.tex[e], nullptr);
+        if (FAILED(hr)) {
+            Log("d3d: [cpu] eye texture %d failed %08lX", e, hr);
+            return false;
+        }
+        S.tex[e]->GetSurfaceLevel(0, &S.surf[e]);
+        hr = g_dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &S.sys[e], nullptr);
+        if (FAILED(hr)) {
+            Log("d3d: [cpu] system-memory surface %d failed %08lX", e, hr);
+            return false;
+        }
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = w;
+        td.Height = h;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        hr = g_d3d11->CreateTexture2D(&td, nullptr, &S.tex11[e]);
+        if (FAILED(hr)) {
+            Log("d3d: [cpu] D3D11 eye texture %d failed %08lX", e, hr);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Bridge 2: copy one eye from its D3D9 render target into its D3D11 texture.
+static void CopyEyeCpu(EyeSet& S, int e) {
+    if (FAILED(g_dev->GetRenderTargetData(S.surf[e], S.sys[e]))) return;
+    D3DLOCKED_RECT lr;
+    if (FAILED(S.sys[e]->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return;
+    g_ctx11->UpdateSubresource(S.tex11[e], 0, nullptr, lr.pBits, lr.Pitch, 0);
+    S.sys[e]->UnlockRect();
+}
+
 static bool CreateTargets() {
     if (g_targetsFailed) return false;
     UINT w = vr::S.renderW, h = vr::S.renderH;
     if (!EnsureD3D11()) { g_targetsFailed = true; return false; }
-    for (int e = 0; e < 2; e++) {
-        HANDLE shared = nullptr;
-        HRESULT hr = oCreateTexture(g_dev, w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &g_eyeTex[e],
-                                    g_ex ? &shared : nullptr);
-        if (FAILED(hr)) {
-            Log("d3d: eye texture %d (%ux%u) creation failed %08lX", e, w, h, hr);
-            ReleaseTargets();
-            g_targetsFailed = true;
-            return false;
+    static const char* names[] = {"shared D3D9->D3D11", "shared D3D11->D3D9", "system-memory copy"};
+    if (g_bridge < 0) g_bridge = vr::S.fake ? 0 : g_cfg.d3dBridge < 0 ? 0 : g_cfg.d3dBridge > 2 ? 2 : g_cfg.d3dBridge;
+    // Remember the bridge that worked (device resets recreate the targets).
+    for (int b = g_bridge; b < 3; b++) {
+        if (vr::S.fake && b > 0) break;
+        // The system-memory copy waits for the GPU anyway, so pipelining would gain nothing there.
+        int sets = (g_cfg.pipelineFrames && b != 2 && !vr::S.fake) ? 3 : 1;
+        bool ok = true;
+        for (int i = 0; i < sets && ok; i++) {
+            EyeSet& S = g_sets[i];
+            ok = b == 0 ? CreateTargets9to11(S, w, h) : b == 1 ? CreateTargets11to9(S, w, h) : CreateTargetsCpu(S, w, h);
+            if (ok) g_dev->CreateQuery(D3DQUERYTYPE_EVENT, &S.query);
         }
-        g_eyeTex[e]->GetSurfaceLevel(0, &g_eyeSurf[e]);
-        if (!vr::S.fake) {
-            hr = g_d3d11->OpenSharedResource(shared, __uuidof(ID3D11Texture2D), (void**)&g_eyeTex11[e]);
-            if (FAILED(hr)) {
-                Log("d3d: OpenSharedResource for eye %d failed %08lX (handle %p)", e, hr, shared);
-                ReleaseTargets();
-                g_targetsFailed = true;
-                return false;
-            }
+        if (ok) {
+            g_bridge = b;
+            g_numSets = sets;
+            g_cur = 0;
+            Log("d3d: eye targets %ux%u created (%s%s)", w, h, names[b], sets > 1 ? ", pipelined" : "");
+            g_stereoReady = true;
+            return true;
         }
+        ReleaseTargets();
+        if (b < 2) Log("d3d: %s unavailable, trying %s", names[b], names[b + 1]);
     }
-    g_dev->CreateQuery(D3DQUERYTYPE_EVENT, &g_query);
-    Log("d3d: eye targets %ux%u created (shared=%d)", w, h, g_ex);
-    g_stereoReady = true;
-    return true;
+    g_targetsFailed = true;
+    return false;
 }
 
-static void FlushGpu() {
-    if (!g_query) return;
-    g_query->Issue(D3DISSUE_END);
+// Marks the end of a set's GPU work and makes sure it is sent to the GPU (without waiting).
+static void IssueEnd(EyeSet& S) {
+    if (!S.query) return;
+    S.query->Issue(D3DISSUE_END);
+    S.query->GetData(nullptr, 0, D3DGETDATA_FLUSH);
+}
+
+// Waits until the GPU has finished writing a set (issued with IssueEnd).
+static void WaitSet(EyeSet& S) {
+    if (!S.query) return;
     DWORD start = GetTickCount();
-    while (g_query->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+    while (S.query->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
         if (GetTickCount() - start > 200) break;
         SwitchToThread();
     }
@@ -313,7 +445,7 @@ static volatile LONG g_shotRequests = 0;
 static int g_shotIndex = 0;
 void RequestShot() { InterlockedIncrement(&g_shotRequests); }
 
-static void DumpEye(int e, const char* prefix = "vr_eye") {
+static void DumpEye(EyeSet& S, int e, const char* prefix = "vr_eye") {
     HMODULE d3dx = GetModuleHandleA("d3dx9_43.dll");
     if (!d3dx) return;
     typedef HRESULT(WINAPI * Save_t)(LPCSTR, DWORD, IDirect3DSurface9*, const PALETTEENTRY*, const RECT*);
@@ -326,13 +458,17 @@ static void DumpEye(int e, const char* prefix = "vr_eye") {
     char name[64];
     snprintf(name, sizeof(name), "%s%d.jpg", prefix, e);
     strcat(path, name);
-    HRESULT hr = save(path, 1 /*D3DXIFF_JPG*/, g_eyeSurf[e], nullptr, nullptr);
+    HRESULT hr = save(path, 1 /*D3DXIFF_JPG*/, S.surf[e], nullptr, nullptr);
     Log("d3d: dumped eye %d -> %s (%08lX)", e, path, hr);
 }
 
 // --- Hooks -----------------------------------------------------------------
 
+static volatile DWORD g_renderThread = 0;
+DWORD RenderThreadId() { return g_renderThread; }
+
 static HRESULT WINAPI hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d, HWND w, const RGNDATA* r) {
+    g_renderThread = GetCurrentThreadId();
     g_presents++;
     if (!g_vrMode) return oPresent(dev, s, d, w, r);
     if (!g_stereoReady && !g_targetsFailed && g_presents > 30) CreateTargets();
@@ -340,32 +476,91 @@ static HRESULT WINAPI hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT
     bool tagged = PopEye(tag);
     if (!g_stereoReady || !tagged) return oPresent(dev, s, d, w, r);
 
+    EyeSet& C = g_sets[g_cur];
     IDirect3DSurface9* bb = nullptr;
     if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
-        HRESULT hr = dev->StretchRect(bb, nullptr, g_eyeSurf[tag.eye], nullptr, D3DTEXF_LINEAR);
+        HRESULT hr = dev->StretchRect(bb, nullptr, C.surf[tag.eye], nullptr, D3DTEXF_LINEAR);
         static int logged = 0;
         if (FAILED(hr) && logged++ < 5) Log("d3d: StretchRect eye %d failed %08lX", tag.eye, hr);
         bb->Release();
     }
-    if (tag.eye == 0) return D3D_OK; // left eye captured; the right eye follows immediately
+    if (g_bridge == 2) CopyEyeCpu(C, tag.eye); // waits for the GPU, so no flush needed for this eye
+    static LARGE_INTEGER tEye0; // when the left eye was finished (splits game+render below)
+    if (tag.eye == 0) {
+        QueryPerformanceCounter(&tEye0);
+        return D3D_OK; // left eye captured; the right eye follows immediately
+    }
 
-    FlushGpu();
+    // Frame timing, to tell what limits the frame rate: the GPU (flush), the compositor (wait)
+    // or the game itself (everything else, split into game tick + left eye, and right eye).
+    static LARGE_INTEGER qpf, tPrev;
+    static double sumFrame, sumFlush, sumWait, sumMax, sumEye1;
+    if (!qpf.QuadPart) QueryPerformanceFrequency(&qpf);
+    LARGE_INTEGER t0, t1, t2, t3;
+    QueryPerformanceCounter(&t0);
+    C.pose = tag.pose;
+    EyeSet* toSubmit = nullptr;
+    if (g_bridge == 2) {
+        toSubmit = &C; // already copied (synchronously) into the D3D11 textures
+    } else if (g_numSets == 1) {
+        IssueEnd(C); // wait for this frame's GPU work, then hand it over
+        WaitSet(C);
+        toSubmit = &C;
+    } else {
+        // Pipelined: queue this frame and submit the previous one, which the GPU has almost
+        // certainly finished while the game was building this frame.
+        IssueEnd(C);
+        C.pending = true;
+        EyeSet& P = g_sets[(g_cur + g_numSets - 1) % g_numSets];
+        if (P.pending) {
+            WaitSet(P);
+            toSubmit = &P;
+        }
+        g_cur = (g_cur + 1) % g_numSets;
+    }
+    QueryPerformanceCounter(&t1);
     unsigned frame = ++g_stereoFrames;
     if (g_cfg.debugDumpFrame > 0 && frame == (unsigned)g_cfg.debugDumpFrame) {
-        DumpEye(0);
-        DumpEye(1);
+        DumpEye(C, 0);
+        DumpEye(C, 1);
     }
     if (g_shotRequests > 0) {
         // Diagnostic snapshot requested by the player (F9 or both sticks).
         InterlockedExchange(&g_shotRequests, 0);
         char prefix[64];
         snprintf(prefix, sizeof(prefix), "vr_shot%02d_eye", ++g_shotIndex);
-        DumpEye(0, prefix);
-        DumpEye(1, prefix);
+        DumpEye(C, 0, prefix);
+        DumpEye(C, 1, prefix);
     }
-    vr::Submit(g_eyeTex11[0], g_eyeTex11[1], tag.pose);
+    if (toSubmit) {
+        vr::Submit(toSubmit->tex11[0], toSubmit->tex11[1], toSubmit->pose);
+        toSubmit->pending = false;
+    }
     HRESULT hr = oPresent(dev, s, d, w, r); // desktop mirror (right eye)
+    QueryPerformanceCounter(&t2);
     vr::WaitGetPoses();
+    QueryPerformanceCounter(&t3);
+    {
+        auto ms = [](LONGLONG a, LONGLONG b) { return (b - a) * 1000.0 / qpf.QuadPart; };
+        if (tPrev.QuadPart) {
+            double f = ms(tPrev.QuadPart, t3.QuadPart);
+            sumFrame += f;
+            if (f > sumMax) sumMax = f;
+        }
+        sumFlush += ms(t0.QuadPart, t1.QuadPart);
+        sumWait += ms(t2.QuadPart, t3.QuadPart);
+        if (tEye0.QuadPart && tEye0.QuadPart < t0.QuadPart) sumEye1 += ms(tEye0.QuadPart, t0.QuadPart);
+        tPrev = t3;
+        const unsigned n = 360;
+        if (frame % n == 0) {
+            double avg = sumFrame / n, game = avg - sumFlush / n - sumWait / n;
+            Log("perf: %.1f fps | frame %.1f ms (worst %.1f) = game+render %.1f (tick+left eye %.1f, right eye %.1f) + gpu flush %.1f + "
+                "compositor wait %.1f | %ux%u per eye, %.0f Hz",
+                avg > 0 ? 1000.0 / avg : 0.0, avg, sumMax, game, game - sumEye1 / n, sumEye1 / n, sumFlush / n, sumWait / n,
+                vr::S.renderW, vr::S.renderH, vr::S.displayHz);
+            sumFrame = sumFlush = sumWait = sumMax = sumEye1 = 0;
+        }
+    }
     if (frame == 1 || frame == 300 || (frame % 9000) == 0) {
         static DWORD lastTick = 0;
         static unsigned lastFrame = 0;
