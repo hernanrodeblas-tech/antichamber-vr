@@ -109,6 +109,7 @@ static int g_savedOcclusion = 0;
 static Obj g_capFn = nullptr;   // capture-camera update the game ran this frame (redone per eye)
 static Obj g_capSelf = nullptr;
 static DWORD g_lastResFix = 0;
+static unsigned g_expectClientW = 0, g_expectClientH = 0; // game window size after our last setres
 static DWORD g_jumpTick = 0;
 static Obj fnSetFOV, fnSetScale, fnUpdWeapPos, fnActiveOverlays, fnInteractTest;
 // Block placement preview: ShowProjectedTile draws its outline with DrawDebugBox. Those debug
@@ -328,6 +329,10 @@ static void ApplyResolution(Obj pc) {
     ConsoleCommand(pc, cmd);
     if (plausible)
         for (int i = 0; i < 6; i++) *(int*)kCached[i] = saved[i];
+    // The window size right after our own resolution change: any later change of it was made by
+    // the game (options wall) and is undone in PreTick.
+    if (!d3dhook::WindowClientSize(g_expectClientW, g_expectClientH)) g_expectClientW = g_expectClientH = 0;
+    Log("window after setres: %ux%u", g_expectClientW, g_expectClientH);
 }
 
 // First-person weapon meshes are drawn with their own 60 degree projection, which only
@@ -628,24 +633,18 @@ static void PreTick(Obj pc, float dt) {
         // A resolution picked on the in-game options wall must not stick. Unreal's D3D9 back
         // buffer only grows, so a smaller resolution keeps the big back buffer and the game draws
         // into its top-left corner (issue #3: small image in a corner, the rest a frozen frame).
-        // That change shows in the window size: remember the size after our own resolution
-        // change, and restore the headset resolution as soon as the window differs from it.
-        static unsigned expectW = 0, expectH = 0;
-        static DWORD expectFor = 0;
+        // That change shows in the window size: ApplyResolution records the size right after our
+        // own resolution change (any later change, even within these 3 s, was made by the game),
+        // and the headset resolution is restored as soon as the window differs from it.
         unsigned bw = 0, bh = 0, cw = 0, ch = 0;
         d3dhook::BackBufferSize(bw, bh);
         bool haveClient = d3dhook::WindowClientSize(cw, ch) && cw && ch;
-        if (expectFor != g_lastResFix && haveClient) {
-            expectFor = g_lastResFix;
-            expectW = cw;
-            expectH = ch;
-        }
         if (bw && (bw != vr::S.renderW || bh != vr::S.renderH)) {
             Log("back buffer is %ux%u, restoring the headset resolution", bw, bh);
             ApplyResolution(pc);
-        } else if (haveClient && expectW && (cw != expectW || ch != expectH)) {
+        } else if (haveClient && g_expectClientW && (cw != g_expectClientW || ch != g_expectClientH)) {
             Log("game window changed to %ux%u (expected %ux%u): the resolution was changed in the game, restoring the headset resolution",
-                cw, ch, expectW, expectH);
+                cw, ch, g_expectClientW, g_expectClientH);
             ApplyResolution(pc);
         }
     }
