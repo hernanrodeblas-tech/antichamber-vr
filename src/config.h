@@ -30,6 +30,8 @@ struct Config {
     bool dynamicShadows = true;   // the game's screen-space hatched shadows (look wrong in stereo)
     bool motionBlur = false;       // the engine's camera motion blur (never wanted in VR)
     char engineSettings[256] = {}; // extra engine scalability settings: "Name=Value, Name=Value" (applied with "scale set")
+    char cpuCores[32] = {};       // CPU cores the game may use, e.g. "2-7" (Steam Frame: medium and fast cores)
+    int renderThreadCore = -1;     // pin the engine render thread to this core (Steam Frame: 7, the fast one); -1 = off
     bool lineworkFix = true;      // scale the line detector's sampling distance to the headset FOV
     bool resizeScreenTargets = true; // let the game resize its capture textures to the headset resolution
     float captureScale = 1.0f;    // capture-texture size relative to the eye resolution (game default 0.75; 0 = leave as is)
@@ -43,6 +45,7 @@ struct Config {
     bool debugFireTrace = false;   // log the script functions that run while the gun trigger is held
     bool debugProfile = false;     // log the UnrealScript functions that cost the most game-thread time
     bool debugProjection = false;  // log which code builds each perspective projection (asymmetric rendering research)
+    bool debugEvents = false;      // log window focus, SteamVR dashboard/focus events and audio output changes
     // Development aids (fake-headset testing)
     int debugJumpNode = -1;       // map node to jump to after start-up (as if clicked on the map wall)
     float debugFakeYaw = 0, debugFakePitch = 0; // fake head orientation (degrees)

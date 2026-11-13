@@ -25,7 +25,7 @@ for f in src/*.cpp; do
 done
 
 $CXX -shared -static -o $OUT/d3d9.dll $OBJS src/d3d9.def \
-    -Wl,--kill-at -Wl,--enable-stdcall-fixup -ld3d11 -ldxgi -ldxguid -luuid -luser32 -lgdi32 -lwinmm
+    -Wl,--kill-at -Wl,--enable-stdcall-fixup -ld3d11 -ldxgi -ldxguid -luuid -luser32 -lgdi32 -lwinmm -lole32
 echo "built $OUT/d3d9.dll"
 
 # Steam Frame helper: a stand-in for the PhysX installer that hangs under Proton/FEX.

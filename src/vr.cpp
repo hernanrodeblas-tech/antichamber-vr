@@ -407,6 +407,32 @@ void PollEvents(bool& quitRequested) {
     if (!g_active || S.fake) return;
     VREvent_t ev;
     while (g_sys->PollNextEvent(&ev, sizeof(ev))) {
+        if (g_cfg.debugEvents) {
+            // Focus / dashboard / standby events, to diagnose what happens when the player leaves
+            // the game for the SteamVR dashboard and comes back.
+            static int logged = 0;
+            const char* name = nullptr;
+            switch (ev.eventType) {
+            case EVREventType_VREvent_InputFocusCaptured: name = "InputFocusCaptured"; break;
+            case EVREventType_VREvent_InputFocusReleased: name = "InputFocusReleased"; break;
+            case EVREventType_VREvent_SceneApplicationChanged: name = "SceneApplicationChanged"; break;
+            case EVREventType_VREvent_InputFocusChanged: name = "InputFocusChanged"; break;
+            case EVREventType_VREvent_SceneApplicationStateChanged: name = "SceneApplicationStateChanged"; break;
+            case EVREventType_VREvent_DashboardActivated: name = "DashboardActivated"; break;
+            case EVREventType_VREvent_DashboardDeactivated: name = "DashboardDeactivated"; break;
+            case EVREventType_VREvent_ResetDashboard: name = "ResetDashboard"; break;
+            case EVREventType_VREvent_OverlayShown: name = "OverlayShown"; break;
+            case EVREventType_VREvent_OverlayHidden: name = "OverlayHidden"; break;
+            case EVREventType_VREvent_EnterStandbyMode: name = "EnterStandbyMode"; break;
+            case EVREventType_VREvent_LeaveStandbyMode: name = "LeaveStandbyMode"; break;
+            case EVREventType_VREvent_TrackedDeviceUserInteractionStarted: name = "UserInteractionStarted"; break;
+            case EVREventType_VREvent_TrackedDeviceUserInteractionEnded: name = "UserInteractionEnded"; break;
+            case EVREventType_VREvent_Quit: name = "Quit"; break;
+            case EVREventType_VREvent_ProcessQuit: name = "ProcessQuit"; break;
+            default: break;
+            }
+            if (name && logged++ < 300) Log("vrevent: %s (%u) device %u", name, ev.eventType, ev.trackedDeviceIndex);
+        }
         if (ev.eventType == EVREventType_VREvent_Quit || ev.eventType == EVREventType_VREvent_ProcessQuit) {
             g_sys->AcknowledgeQuit_Exiting();
             quitRequested = true;

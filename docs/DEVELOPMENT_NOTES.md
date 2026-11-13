@@ -197,3 +197,24 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
   - La pistola usa la proyección del mundo; el punto de mira, el recuadro del bloque y el grosor de las líneas usan la
     proyección de cada ojo.
 - Resultado en las Frame a 90 Hz: hilo de render 9–16 ms (casi siempre 12–14) y 45 fps estables casi todo el tiempo.
+
+## Versión 1.2: núcleos del procesador en las Frame (`CpuCores`, `RenderThreadCore`)
+
+- Idea tomada del parche de Deadlock para Steam Frame de DDD (guía de Steam 3834239849): SteamOS arranca los juegos en
+  parte de los núcleos y, bajo FEX, el núcleo rápido (7) rinde bastante más que los medianos (2–6).
+- En nuestro visor el juego arrancaba con la máscara `F8` (núcleos 3–7). `CpuCores=2-7` (SetProcessAffinityMask, que
+  Proton traduce a sched_setaffinity) se aplica bien pero por sí solo aporta poco.
+- `RenderThreadCore=7`: el hilo de render (el que llama a Present) se fija al núcleo 7 y el del juego se aparta de él.
+  El motor recrea su hilo de render en cada cambio de resolución, así que se vuelve a fijar cuando cambia.
+- Resultado: las salas ligeras pasan de 45 a 80–90 fps a 90 Hz (hilo de render ~7 ms); media de 51,5 fps en una sesión
+  de 18 000 fotogramas. Las salas pesadas siguen a 45 (render 12–16 ms). Calienta algo más el visor.
+- Leer `/proc` desde Proton (unidad `Z:`) no funciona en las Frame, así que solo vemos la máscara que informa Wine.
+
+## Issue #3: cambiar la resolución en la pared de opciones
+
+- El búfer de imagen del D3D9 de Unreal solo crece: al elegir una resolución menor, el juego dibuja en la esquina de la
+  imagen grande y el resto conserva el último fotograma. Como el tamaño del búfer no cambia, la comprobación del mod no lo
+  detectaba. Ahora el mod recuerda el tamaño de la ventana tras su propio cambio de resolución y, si el juego lo cambia,
+  restaura la del visor.
+- Diagnóstico para las issues #1 y #2 (`DebugEvents=1`): foco de la ventana, eventos de SteamVR (menú, foco, reposo) y
+  cambios de la salida de audio de Windows.

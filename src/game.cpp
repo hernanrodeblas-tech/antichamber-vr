@@ -20,6 +20,10 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+
+void AudioDiagPoll(); // audiodiag.cpp
+void LogLinuxCpus(const char* who, bool thread); // cpucores.cpp
+void KeepGameThreadOffRenderCore();
 #include <vector>
 
 namespace dbgdump { void Run(ue::Obj pc, ue::Obj localPlayer, int boolMaskOff); void DumpObject(ue::Obj o, const char* tag, int boolMaskOff); void XrefTile(); }
@@ -461,7 +465,9 @@ static void Edge(bool now, bool& prev, Obj pc, Obj onPress, Obj onRelease) {
 
 static DWORD g_gameThread;
 static void PreTick(Obj pc, float dt) {
+    if (g_gameThread != GetCurrentThreadId()) KeepGameThreadOffRenderCore();
     g_gameThread = GetCurrentThreadId();
+    if (g_cfg.debugEvents) AudioDiagPoll();
     g_tileLines.clear();
     g_capFn = nullptr;
     bool quit = false;
@@ -619,10 +625,27 @@ static void PreTick(Obj pc, float dt) {
     }
     if (!g_setupDone) OneTimeSetup(pc);
     else if (GetTickCount() - g_lastResFix > 3000) {
-        unsigned bw = 0, bh = 0;
+        // A resolution picked on the in-game options wall must not stick. Unreal's D3D9 back
+        // buffer only grows, so a smaller resolution keeps the big back buffer and the game draws
+        // into its top-left corner (issue #3: small image in a corner, the rest a frozen frame).
+        // That change shows in the window size: remember the size after our own resolution
+        // change, and restore the headset resolution as soon as the window differs from it.
+        static unsigned expectW = 0, expectH = 0;
+        static DWORD expectFor = 0;
+        unsigned bw = 0, bh = 0, cw = 0, ch = 0;
         d3dhook::BackBufferSize(bw, bh);
+        bool haveClient = d3dhook::WindowClientSize(cw, ch) && cw && ch;
+        if (expectFor != g_lastResFix && haveClient) {
+            expectFor = g_lastResFix;
+            expectW = cw;
+            expectH = ch;
+        }
         if (bw && (bw != vr::S.renderW || bh != vr::S.renderH)) {
             Log("back buffer is %ux%u, restoring the headset resolution", bw, bh);
+            ApplyResolution(pc);
+        } else if (haveClient && expectW && (cw != expectW || ch != expectH)) {
+            Log("game window changed to %ux%u (expected %ux%u): the resolution was changed in the game, restoring the headset resolution",
+                cw, ch, expectW, expectH);
             ApplyResolution(pc);
         }
     }
@@ -1692,6 +1715,7 @@ static void __fastcall hkViewportDraw(void* self, void* edx, int bShouldPresent)
             return r;
         };
         static double lastGame, lastRender;
+        if (lastGame == 0) LogLinuxCpus("game thread", true);
         double g = cpuMs(GetCurrentThreadId()), rnd = cpuMs(d3dhook::RenderThreadId());
         if (lastGame > 0)
             Log("perf cpu busy per frame: game thread %.1f ms, render thread %.1f ms (frame %.1f ms)", (g - lastGame) / frames,

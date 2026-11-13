@@ -79,6 +79,8 @@ void LoadConfig() {
         KB("DynamicShadows", dynamicShadows);
         KB("MotionBlur", motionBlur);
         else if (!_stricmp(key, "EngineSettings")) { strncpy(g_cfg.engineSettings, val, sizeof(g_cfg.engineSettings) - 1); }
+        else if (!_stricmp(key, "CpuCores")) { strncpy(g_cfg.cpuCores, val, sizeof(g_cfg.cpuCores) - 1); }
+        KI("RenderThreadCore", renderThreadCore);
         KB("LineworkFix", lineworkFix);
         KB("ResizeScreenTargets", resizeScreenTargets);
         KF("CaptureScale", captureScale);
@@ -92,6 +94,7 @@ void LoadConfig() {
         KB("DebugFireTrace", debugFireTrace);
         KB("DebugProfile", debugProfile);
         KB("DebugProjection", debugProjection);
+        KB("DebugEvents", debugEvents);
         KI("DebugJumpNode", debugJumpNode);
         KF("DebugFakeYaw", debugFakeYaw);
         KF("DebugFakePitch", debugFakePitch);

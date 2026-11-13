@@ -17,6 +17,9 @@
 #include <deque>
 #include <MinHook.h>
 
+void LogLinuxCpus(const char* who, bool thread); // cpucores.cpp
+void PinRenderThread();
+
 namespace d3dhook {
 
 template <typename Fn> static Fn PatchVtbl(void* obj, int index, Fn hook) {
@@ -98,6 +101,14 @@ bool VrMode() { return g_vrMode; }
 bool StereoReady() { return g_stereoReady; }
 unsigned StereoFrames() { return g_stereoFrames; }
 static volatile unsigned g_bbW = 0, g_bbH = 0;
+bool WindowClientSize(unsigned& w, unsigned& h) {
+    RECT r;
+    if (!g_hwnd || !GetClientRect(g_hwnd, &r)) return false;
+    w = (unsigned)(r.right - r.left);
+    h = (unsigned)(r.bottom - r.top);
+    return true;
+}
+
 void BackBufferSize(unsigned& w, unsigned& h) {
     w = g_bbW;
     h = g_bbH;
@@ -468,6 +479,7 @@ static volatile DWORD g_renderThread = 0;
 DWORD RenderThreadId() { return g_renderThread; }
 
 static HRESULT WINAPI hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d, HWND w, const RGNDATA* r) {
+    if (g_renderThread != GetCurrentThreadId()) PinRenderThread(); // the engine recreates its render thread on device resets
     g_renderThread = GetCurrentThreadId();
     g_presents++;
     if (!g_vrMode) return oPresent(dev, s, d, w, r);
@@ -569,6 +581,7 @@ static HRESULT WINAPI hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT
             Log("d3d: stereo frame %u (%.1f fps)", frame, (frame - lastFrame) * 1000.0f / (now - lastTick));
         else
             Log("d3d: stereo frame %u", frame);
+        if (frame == 300) LogLinuxCpus("render thread", true);
         lastTick = now;
         lastFrame = frame;
     }
@@ -650,6 +663,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         mm->ptMaxSize.x = 16384;
         mm->ptMaxSize.y = 16384;
         return r;
+    }
+    if (g_cfg.debugEvents && (msg == WM_ACTIVATEAPP || msg == WM_ACTIVATE || msg == WM_SETFOCUS || msg == WM_KILLFOCUS)) {
+        static int logged = 0;
+        if (logged++ < 200)
+            Log("wnd: %s %lu (%s)", msg == WM_ACTIVATEAPP ? "WM_ACTIVATEAPP" : msg == WM_ACTIVATE ? "WM_ACTIVATE" : msg == WM_SETFOCUS ? "WM_SETFOCUS" : "WM_KILLFOCUS",
+                (unsigned long)LOWORD(wp), GetForegroundWindow() == hwnd ? "foreground" : "background");
     }
     if (msg == WM_WINDOWPOSCHANGING) {
         WINDOWPOS* wpos = (WINDOWPOS*)lp;

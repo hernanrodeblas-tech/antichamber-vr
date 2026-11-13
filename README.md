@@ -63,12 +63,35 @@ The launcher is not used there; the settings come from a ready-made ini.
    ```
 6. Back in the headset, start Antichamber from the library.
 
-The Frame preset renders at SteamVR's recommended resolution, turns the dynamic shadows off (by far the biggest cost
-there), sets `PipelineFrames=1` so the CPU and GPU work in parallel and `AsymmetricFrustum=1` so each eye renders only
-its own field of view. At 90 Hz it holds 45 fps most of the time (light rooms reach 72 at 72 Hz), smoothed by
-SteamVR's reprojection; 72 Hz and 90 Hz both work. To change a setting, edit
-`Binaries/Win32/antichamber_vr.ini` (same keys as the launcher). If something goes wrong, the log is
-`Binaries/Win32/antichamber_vr.log`.
+To change a setting, edit `Binaries/Win32/antichamber_vr.ini` (same keys as the launcher). If something goes wrong,
+the log is `Binaries/Win32/antichamber_vr.log`.
+
+### Performance on the Steam Frame
+
+The Frame runs Antichamber as an emulated x86 game (FEX) on an ARM chip, so what limits it is not the GPU but the
+CPU, and in particular **one thread: the engine's render thread** (the one that issues every draw call for both eyes).
+Measured with the `perf:` lines the mod writes to the log, the game thread needs 8–10 ms per frame and the scripts only
+2–4 ms, while the render thread needed 14–18 ms. Lowering the resolution changed nothing; these did:
+
+| Setting (Frame preset) | What it does | Effect measured on the Frame |
+| --- | --- | --- |
+| `DynamicShadows=0` | No dynamic shadows: each shadowed light re-draws the scene from the light, for each eye | Biggest single gain: average ~35 → ~50 fps |
+| `PipelineFrames=1` | Each frame is handed to SteamVR one frame later, so the CPU never waits for the GPU | ~10 ms of waiting per frame removed |
+| `AsymmetricFrustum=1` | Each eye renders only its own field of view (1728×1728 instead of 2004×2076) | ~28 % fewer pixels, fewer objects to draw; render thread 14–18 → 9–16 ms |
+| `RenderThreadCore=7`, `CpuCores=2-7` | Pins the render thread to the chip's fast core and lets the game use cores 2–7 | Light rooms reach **90 fps at 90 Hz**; average ~51 fps over a long session |
+
+**The CPU-core finding.** The Frame's Snapdragon 8 Gen 3 has two small cores (0–1), five medium cores (2–6) and one
+fast core (7), and under emulation the fast core is much quicker than the others. SteamOS starts the game restricted to
+some of the cores (3–7 on the unit we tested), and the render thread, which limits everything, was being moved around
+the medium cores. Pinning it to core 7 (and keeping the game thread off that core) took light rooms from 45 to 80–90 fps;
+heavy rooms stay at 45. The headset runs warmer this way; remove `RenderThreadCore=7` from the ini if that bothers you.
+The idea comes from DDD's [Deadlock Steam Frame patch](https://steamcommunity.com/sharedfiles/filedetails/?id=3834239849),
+which moves Deadlock to the fast cores for the same reason.
+
+Tried without a measurable gain: turning off depth of field, ambient occlusion, light shafts, lens flares, decals or
+distortion (`EngineSettings`), per-eye scene captures (`StereoCaptures=0`) and occlusion queries (`OcclusionQueries=0`).
+To measure on your own unit, the log has a `perf:` line every few seconds (fps, frame time and its split) and a
+`perf cpu busy per frame` line (CPU time of the game and render threads).
 
 **Uninstall:** delete `AntichamberVR.exe` and, from `Binaries\Win32`, `d3d9.dll`, `openvr_api.dll`,
 `antichamber_vr.ini` and `antichamber_vr.log`.
@@ -106,6 +129,7 @@ Everything is in the launcher, which writes `Binaries\Win32\antichamber_vr.ini`.
 | `DynamicShadows`, `MotionBlur` | The game's dynamic shadows; camera motion blur (off by default) |
 | `PipelineFrames` | CPU and GPU work in parallel: more fps on slow systems, one frame more latency |
 | `AsymmetricFrustum` | Each eye renders only its own field of view: ~28% fewer pixels and fewer objects to draw |
+| `CpuCores`, `RenderThreadCore` | CPU cores the game may use; core the render thread is pinned to (Steam Frame: `2-7`, `7`) |
 | `D3DBridge` | How images reach SteamVR (automatic by default) |
 
 ## Known limitations
@@ -189,12 +213,33 @@ se usa el launcher; la configuración viene en un ini preparado.
    ```
 6. Vuelve al visor y abre Antichamber desde la biblioteca.
 
-El ini de las Frame usa la resolución recomendada por SteamVR, desactiva las sombras dinámicas (con diferencia lo que
-más cuesta allí), activa `PipelineFrames=1` para que CPU y GPU trabajen a la vez y `AsymmetricFrustum=1` para que cada
-ojo dibuje solo su propio campo de visión. A 90 Hz se mantiene casi siempre a 45 fps (las salas ligeras llegan a 72 a
-72 Hz), suavizados por la reproyección de SteamVR; funciona a 72 Hz y a 90 Hz. Para cambiar
-algo, edita `Binaries/Win32/antichamber_vr.ini` (las mismas claves que el launcher). El registro está en
+Para cambiar algo, edita `Binaries/Win32/antichamber_vr.ini` (las mismas claves que el launcher). El registro está en
 `Binaries/Win32/antichamber_vr.log`.
+
+**Rendimiento en las Frame.** Las Frame ejecutan Antichamber emulado (FEX, de x86 a ARM), así que lo que limita no es
+la GPU sino el procesador, y en concreto **un solo hilo: el de render del motor**, que manda todos los dibujos de los dos
+ojos. Medido con las líneas `perf:` del registro: el hilo del juego necesita 8–10 ms por fotograma y los scripts 2–4 ms,
+pero el de render necesitaba 14–18 ms. Bajar la resolución no cambiaba nada; esto sí:
+
+| Ajuste (ini de las Frame) | Qué hace | Efecto medido en las Frame |
+| --- | --- | --- |
+| `DynamicShadows=0` | Sin sombras dinámicas: cada luz con sombras vuelve a dibujar la escena, por ojo | La mayor mejora: media de ~35 a ~50 fps |
+| `PipelineFrames=1` | Cada fotograma se entrega a SteamVR uno más tarde, y la CPU nunca espera a la GPU | Quita ~10 ms de espera por fotograma |
+| `AsymmetricFrustum=1` | Cada ojo dibuja solo su campo de visión (1728×1728 en vez de 2004×2076) | ~28 % menos píxeles y menos objetos; hilo de render de 14–18 a 9–16 ms |
+| `RenderThreadCore=7`, `CpuCores=2-7` | Fija el hilo de render al núcleo rápido del chip y deja usar los núcleos 2–7 | Las salas ligeras llegan a **90 fps a 90 Hz**; media de ~51 fps en sesión larga |
+
+**El hallazgo de los núcleos.** El Snapdragon 8 Gen 3 de las Frame tiene dos núcleos pequeños (0–1), cinco medianos (2–6)
+y uno rápido (7), y con emulación el rápido rinde bastante más que los demás. SteamOS arranca el juego limitado a parte de
+los núcleos (3–7 en el visor de pruebas) y el hilo de render, que es el que limita todo, iba saltando entre los medianos.
+Fijarlo al núcleo 7 (y apartar de él el hilo del juego) llevó las salas ligeras de 45 a 80–90 fps; las pesadas siguen a 45.
+El visor se calienta algo más; si te molesta, quita `RenderThreadCore=7` del ini. La idea viene del
+[parche de Deadlock para Steam Frame](https://steamcommunity.com/sharedfiles/filedetails/?id=3834239849) de DDD, que mueve
+Deadlock a los núcleos rápidos por el mismo motivo.
+
+Probado sin mejora medible: quitar profundidad de campo, oclusión ambiental, rayos de luz, destellos, calcomanías o
+distorsión (`EngineSettings`), las capturas por ojo (`StereoCaptures=0`) y las consultas de oclusión
+(`OcclusionQueries=0`). Para medir en tu visor, el registro tiene una línea `perf:` cada pocos segundos y otra
+`perf cpu busy per frame` con el tiempo de CPU de los hilos del juego y de render.
 
 **Limitación conocida:** tras jugar en VR, el juego guarda la resolución del visor en su configuración; si luego
 juegas en plano, elige otra vez la resolución en la pared de opciones del juego.

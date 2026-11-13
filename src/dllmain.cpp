@@ -9,6 +9,7 @@
 
 void InstallCrashLogger();
 void InstallPhysXFix();
+void ApplyCpuCores();
 
 static HMODULE g_real = nullptr;
 
@@ -92,6 +93,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
         LoadConfig();
         InstallCrashLogger();
         if (g_cfg.fixPhysX) InstallPhysXFix();
+        ApplyCpuCores();
     }
     return TRUE;
 }
