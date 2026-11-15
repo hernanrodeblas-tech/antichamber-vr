@@ -86,7 +86,13 @@ BOOL WINAPI D3DPERF_QueryRepeatFrame(void) {
 
 } // extern "C"
 
-BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
+    if (reason == DLL_PROCESS_DETACH) {
+        // Not reached when the process is killed, so its absence in the log means the game was
+        // terminated from outside (e.g. by SteamVR) rather than closed normally.
+        if (g_cfg.debugEvents) Log("process exit (%s)", reserved ? "normal shutdown" : "dll unloaded");
+        return TRUE;
+    }
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
         LogInit();

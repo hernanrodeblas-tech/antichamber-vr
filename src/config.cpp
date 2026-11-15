@@ -60,6 +60,7 @@ void LoadConfig() {
         KF("SnapTurnDegrees", snapTurnDegrees);
         KF("SmoothTurnSpeed", smoothTurnSpeed);
         KB("MoveRelativeToHand", moveRelativeToHand);
+        else if (!_stricmp(key, "MoveDirection")) g_cfg.moveDirection = !_stricmp(val, "Left") || !_stricmp(val, "Izquierdo") ? 1 : !_stricmp(val, "Right") || !_stricmp(val, "Derecho") ? 2 : !_stricmp(val, "Head") || !_stricmp(val, "Cabeza") ? 0 : atoi(val);
         KB("LeftHanded", leftHanded);
         KF("StickDeadzone", stickDeadzone);
         KF("AimPitchOffset", aimPitchOffset);

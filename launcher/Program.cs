@@ -186,9 +186,14 @@ public sealed class MainForm : Form
 
         Header(grid, T("Movement", "Movimiento"));
         var dir = Combo(grid, T("Movement direction", "Dirección de avance"),
-            T("Where the movement stick moves you.", "Hacia dónde avanza el stick de movimiento."),
-            T("Where you look", "Hacia donde miras"), T("Where the hand points", "Hacia donde apunta la mano"));
-        BindCombo("Controles", "MoveRelativeToHand", "0", "0 = hacia donde miras, 1 = hacia la mano", dir);
+            T("Forward on the movement stick follows your head, or where the chosen controller points.",
+              "Adelante en el stick de movimiento sigue a tu cabeza, o hacia donde apunta el mando elegido."),
+            T("Where you look (headset)", "Hacia donde miras (visor)"), T("Where the left controller points", "Hacia donde apunta el mando izquierdo"),
+            T("Where the right controller points", "Hacia donde apunta el mando derecho"));
+        Bind("Controles", "MoveDirection", "Head", "Head = hacia donde miras, Left / Right = hacia donde apunta ese mando",
+            v => dir.SelectedIndex = v.Equals("Left", StringComparison.OrdinalIgnoreCase) || v == "1" ? 1
+                : v.Equals("Right", StringComparison.OrdinalIgnoreCase) || v == "2" ? 2 : 0,
+            () => dir.SelectedIndex == 1 ? "Left" : dir.SelectedIndex == 2 ? "Right" : "Head");
         var hand = Combo(grid, T("Gun hand", "Mano del arma"), T("The other hand is used for moving.", "La otra mano se usa para moverse."),
             T("Right", "Derecha"), T("Left", "Izquierda"));
         BindCombo("Controles", "LeftHanded", "0", "1 = arma en la mano izquierda", hand);

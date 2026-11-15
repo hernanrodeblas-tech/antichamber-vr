@@ -702,12 +702,16 @@ static void PreTick(Obj pc, float dt) {
         }
     }
 
-    // Locomotion stick, relative to head (default) or hand yaw.
+    // Locomotion stick, relative to the head (default) or to where a chosen controller points.
     float sx = Deadzone(moveHand.stickX), sy = Deadzone(moveHand.stickY);
     float mag = sqrtf(sx * sx + sy * sy);
     if (mag > 1) mag = 1;
-    if (g_cfg.moveRelativeToHand && moveHand.valid && f.hmdValid) {
-        Vec3 hf = DirToWorld(f.hmd.Forward()), cf = DirToWorld(moveHand.aim.Forward());
+    const vr::Hand* dirHand = nullptr;
+    if (g_cfg.moveDirection == 1) dirHand = &f.hand[0];
+    else if (g_cfg.moveDirection == 2) dirHand = &f.hand[1];
+    else if (g_cfg.moveDirection < 0 && g_cfg.moveRelativeToHand) dirHand = &moveHand; // old MoveRelativeToHand=1
+    if (dirHand && dirHand->valid && f.hmdValid) {
+        Vec3 hf = DirToWorld(f.hmd.Forward()), cf = DirToWorld(dirHand->aim.Forward());
         float a = atan2f(cf.y, cf.x) - atan2f(hf.y, hf.x), c = cosf(a), s = sinf(a);
         float nx = sx * c + sy * s, ny = -sx * s + sy * c;
         sx = nx;

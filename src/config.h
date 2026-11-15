@@ -13,6 +13,7 @@ struct Config {
     float snapTurnDegrees = 30.0f;
     float smoothTurnSpeed = 120.0f; // degrees per second
     bool moveRelativeToHand = false;
+    int moveDirection = -1;        // MoveDirection: 0 = head, 1 = left controller, 2 = right controller (-1 = not set: MoveRelativeToHand decides)
     bool leftHanded = false;
     float stickDeadzone = 0.2f;
     float aimPitchOffset = 0.0f;  // degrees, tilts the aim ray down (+) / up (-)

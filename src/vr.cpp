@@ -381,9 +381,13 @@ void WaitGetPoses() {
     if (err != EVRCompositorError_VRCompositorError_None && logged++ < 10) Log("vr: WaitGetPoses error %d", err);
 }
 
+// Submit diagnostics (DebugEvents): result of the last submit and how many were sent.
+static volatile LONG g_submits = 0, g_lastSubmitErr = -1;
+
 bool Submit(void* left, void* right, const Mat34& hmdPoseUsed) {
     if (!g_active || S.fake) return true;
     bool ok = true;
+    int firstErr = 0;
     void* tex[2] = {left, right};
     for (int e = 0; e < 2; e++) {
         VRTextureWithPose_t t;
@@ -396,17 +400,46 @@ bool Submit(void* left, void* right, const Mat34& hmdPoseUsed) {
         static int logged = 0;
         if (err != EVRCompositorError_VRCompositorError_None) {
             ok = false;
+            if (!firstErr) firstErr = err;
             if (logged++ < 20) Log("vr: Submit eye %d error %d", e, err);
         }
     }
+    InterlockedIncrement(&g_submits);
+    LONG prev = InterlockedExchange(&g_lastSubmitErr, firstErr);
+    if (g_cfg.debugEvents && prev != firstErr) Log("vrstate: submit result %d (was %ld)", firstErr, prev);
     return ok;
+}
+
+// DebugEvents: while the SteamVR dashboard is open (and for 30 s after it closes), a status line
+// every 2 s: whether SteamVR still takes our frames, which process it shows as the scene app,
+// and whether it asks the game to pause. For issue #1 (dashboard panel staying in front).
+static bool g_dashboardOpen = false;
+static DWORD g_dashboardClosedAt = 0;
+static void LogVrState() {
+    static DWORD last = 0;
+    static LONG lastSubmits = 0;
+    DWORD now = GetTickCount();
+    bool recent = g_dashboardOpen || (g_dashboardClosedAt && now - g_dashboardClosedAt < 30000);
+    if (!recent || now - last < 2000) return;
+    LONG submits = g_submits;
+    Log("vrstate: dashboard %s | submits +%ld, last result %ld | scene focus pid %u (ours %lu), last renderer %u | canRender %d shouldPause %d",
+        g_dashboardOpen ? "open" : "closed", submits - lastSubmits, (long)g_lastSubmitErr, g_comp->GetCurrentSceneFocusProcess(),
+        GetCurrentProcessId(), g_comp->GetLastFrameRenderer(), g_comp->CanRenderScene(), g_sys->ShouldApplicationPause());
+    last = now;
+    lastSubmits = submits;
 }
 
 void PollEvents(bool& quitRequested) {
     quitRequested = false;
     if (!g_active || S.fake) return;
+    if (g_cfg.debugEvents) LogVrState();
     VREvent_t ev;
     while (g_sys->PollNextEvent(&ev, sizeof(ev))) {
+        if (ev.eventType == EVREventType_VREvent_DashboardActivated) g_dashboardOpen = true;
+        if (ev.eventType == EVREventType_VREvent_DashboardDeactivated) {
+            g_dashboardOpen = false;
+            g_dashboardClosedAt = GetTickCount();
+        }
         if (g_cfg.debugEvents) {
             // Focus / dashboard / standby events, to diagnose what happens when the player leaves
             // the game for the SteamVR dashboard and comes back.

@@ -10,7 +10,7 @@
     <RootNamespace>AntichamberVR</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Product>Antichamber VR Launcher</Product>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
   </PropertyGroup>
 
 </Project>

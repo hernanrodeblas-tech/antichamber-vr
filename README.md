@@ -120,6 +120,7 @@ Everything is in the launcher, which writes `Binaries\Win32\antichamber_vr.ini`.
 | --- | --- |
 | `PlayMode`, `SeatedEyeHeight` | Standing (real height) or seated (fixed eye height) |
 | `SnapTurn`, `SnapTurnDegrees`, `SmoothTurnSpeed` | Turning |
+| `MoveDirection` | Forward on the movement stick: `Head` (where you look), `Left` or `Right` (where that controller points) |
 | `MaxRenderWidth`, `ResolutionScale` | Per-eye resolution |
 | `CaptureScale` | Mirror/portal resolution relative to the eye (game default 0.75) |
 | `WorldScale` | Unreal units per metre (default 50) |

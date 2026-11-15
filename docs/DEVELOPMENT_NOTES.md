@@ -221,3 +221,11 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 - 1.2.1: el tamaño de ventana esperado se apuntaba al empezar cada comprobación (cada 3 s), así que un segundo cambio de
   resolución hecho dentro de ese margen se tomaba como correcto y el visor se quedaba con la imagen congelada. Ahora se
   apunta justo después del `setres` del mod, y cada cambio posterior se deshace.
+
+## Versión 1.2.2
+
+- `MoveDirection` (launcher: *Juego → Dirección de avance*): adelante en el stick de movimiento sigue a la cabeza, al mando
+  izquierdo o al mando derecho. `MoveRelativeToHand=1` sigue funcionando (mano de movimiento) si no hay `MoveDirection`.
+- Diagnóstico de la issue #1 (`DebugEvents=1`): cada cambio del resultado de `Submit`, una línea `vrstate:` cada 2 s con el
+  menú de SteamVR abierto (y 30 s después) con envíos, resultado, proceso de escena activo, `CanRenderScene` y
+  `ShouldApplicationPause`, y `process exit` al cerrarse con normalidad.
